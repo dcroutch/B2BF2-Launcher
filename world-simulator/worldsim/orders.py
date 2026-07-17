@@ -114,11 +114,28 @@ def _shift_relations(actor, target, delta: float) -> None:
     target.clamp_stats()
 
 
+def _enter_war(world: World, side_a, side_b) -> None:
+    """Put two nations at war with each other (idempotent), without the
+    relations penalty of a fresh declaration -- used both by a direct
+    declare_war and by an ally invoking its defense pact."""
+    if side_b.id in side_a.at_war_with:
+        return
+    side_a.alliances.discard(side_b.id)
+    side_b.alliances.discard(side_a.id)
+    side_a.at_war_with.add(side_b.id)
+    side_b.at_war_with.add(side_a.id)
+
+
 def _react_third_parties(world: World, actor, target, event: str) -> None:
     """The rest of the world doesn't just watch: allies and rivals of the
     two participants shift their own stance in response to what just
     happened. This is what makes the simulation feel alive without any
     AI/LLM call -- it's a fixed rule applied to every bystander nation.
+
+    Alliances are formal mutual-defense pacts (this is what makes NATO act
+    like NATO): attacking any member is treated as attacking the whole
+    bloc, so every other ally invokes its defense obligation and joins the
+    war against the aggressor -- it isn't just a relations hit.
     """
     for other in world.alive_nations():
         if other.id in (actor.id, target.id):
@@ -127,7 +144,11 @@ def _react_third_parties(world: World, actor, target, event: str) -> None:
         if event == "war":
             if target.id in other.alliances:
                 _shift_relations(other, actor, ALLY_SOLIDARITY_RELATION_HIT)
-                world.log(f"{other.name} condemns {actor.name}'s war on its ally {target.name}.")
+                _enter_war(world, other, actor)
+                world.log(
+                    f"{other.name} invokes its defense pact with {target.name} "
+                    f"and joins the war against {actor.name}."
+                )
             elif actor.id in other.alliances:
                 _shift_relations(other, target, ALLY_BACKING_RELATION_HIT)
                 world.log(f"{other.name} backs its ally {actor.name} against {target.name}.")
@@ -211,10 +232,7 @@ def _resolve_declare_war(world: World, order: Order) -> None:
     target = world.get(order.target_id)
     if target.id in actor.at_war_with:
         return
-    actor.alliances.discard(target.id)
-    target.alliances.discard(actor.id)
-    actor.at_war_with.add(target.id)
-    target.at_war_with.add(actor.id)
+    _enter_war(world, actor, target)
     _shift_relations(actor, target, WAR_RELATION_HIT)
     world.log(f"{actor.name} declares war on {target.name}!")
     _react_third_parties(world, actor, target, "war")

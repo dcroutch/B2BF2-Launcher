@@ -138,6 +138,38 @@ class TestThirdPartyReactions(unittest.TestCase):
         self.assertLess(world.get("c").relation("a"), 0)
         self.assertLess(world.get("a").relation("c"), 0)
 
+    def test_ally_of_target_invokes_article_5_and_joins_the_war(self):
+        # Alliances are mutual-defense pacts: attacking one member is
+        # treated as attacking the whole bloc, so the ally doesn't just
+        # disapprove -- it actually enters the war against the aggressor.
+        world = make_world_with_bystander()
+        world.get("c").alliances.add("b")
+        world.get("b").alliances.add("c")
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertIn("a", world.get("c").at_war_with)
+        self.assertIn("c", world.get("a").at_war_with)
+
+    def test_multiple_allies_all_join_a_war_on_a_shared_member(self):
+        a = Nation(id="a", name="A")
+        b = Nation(id="b", name="B")
+        c = Nation(id="c", name="C")
+        d = Nation(id="d", name="D")
+        for x, y in ((b, c), (b, d), (c, d)):
+            x.alliances.add(y.id)
+            y.alliances.add(x.id)
+        world = World(nations={"a": a, "b": b, "c": c, "d": d})
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertIn("a", world.get("c").at_war_with)
+        self.assertIn("a", world.get("d").at_war_with)
+
+    def test_ally_joining_war_does_not_break_its_own_alliance_with_target(self):
+        world = make_world_with_bystander()
+        world.get("c").alliances.add("b")
+        world.get("b").alliances.add("c")
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertIn("b", world.get("c").alliances)
+        self.assertIn("c", world.get("b").alliances)
+
     def test_ally_of_actor_turns_on_target_when_war_declared(self):
         world = make_world_with_bystander()
         world.get("c").alliances.add("a")
