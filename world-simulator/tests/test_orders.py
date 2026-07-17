@@ -1,0 +1,239 @@
+import unittest
+
+from worldsim.models import Nation, World
+from worldsim.orders import Order, legal_orders, resolve_orders
+
+
+def make_world(**overrides):
+    a = Nation(id="a", name="A")
+    b = Nation(id="b", name="B")
+    for attr, value in overrides.get("a", {}).items():
+        setattr(a, attr, value)
+    for attr, value in overrides.get("b", {}).items():
+        setattr(b, attr, value)
+    return World(nations={"a": a, "b": b})
+
+
+def make_world_with_bystander(**overrides):
+    """Three-nation world (a, b, c) for third-party reaction tests."""
+    a = Nation(id="a", name="A")
+    b = Nation(id="b", name="B")
+    c = Nation(id="c", name="C")
+    for attr, value in overrides.get("a", {}).items():
+        setattr(a, attr, value)
+    for attr, value in overrides.get("b", {}).items():
+        setattr(b, attr, value)
+    for attr, value in overrides.get("c", {}).items():
+        setattr(c, attr, value)
+    return World(nations={"a": a, "b": b, "c": c})
+
+
+class TestOrderValidation(unittest.TestCase):
+    def test_self_targeted_order_is_rejected(self):
+        with self.assertRaises(ValueError):
+            Order("a", "declare_war", "a")
+
+
+class TestLegalOrders(unittest.TestCase):
+    def test_declare_war_not_offered_if_already_at_war(self):
+        world = make_world()
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
+        self.assertNotIn("declare_war", types)
+        self.assertIn("sue_for_peace", types)
+
+    def test_propose_alliance_requires_relation_threshold(self):
+        world = make_world()
+        types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
+        self.assertNotIn("propose_alliance", types)
+        world.get("a").relations["b"] = 50
+        world.get("b").relations["a"] = 50
+        types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
+        self.assertIn("propose_alliance", types)
+
+    def test_propose_alliance_not_offered_if_relation_one_sided(self):
+        world = make_world()
+        world.get("a").relations["b"] = 50
+        world.get("b").relations["a"] = -10
+        types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
+        self.assertNotIn("propose_alliance", types)
+
+
+class TestResolveOrders(unittest.TestCase):
+    def test_declare_war_sets_mutual_war_state(self):
+        world = make_world()
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertIn("b", world.get("a").at_war_with)
+        self.assertIn("a", world.get("b").at_war_with)
+        self.assertLess(world.get("a").relation("b"), 0)
+
+    def test_improve_relations_is_mutual(self):
+        world = make_world()
+        resolve_orders(world, [Order("a", "improve_relations", "b")])
+        self.assertEqual(world.get("a").relation("b"), 8)
+        self.assertEqual(world.get("b").relation("a"), 8)
+
+    def test_propose_alliance_fails_below_threshold(self):
+        world = make_world()
+        resolve_orders(world, [Order("a", "propose_alliance", "b")])
+        self.assertNotIn("b", world.get("a").alliances)
+
+    def test_propose_alliance_succeeds_when_mutual_high_relations(self):
+        world = make_world()
+        world.get("a").relations["b"] = 50
+        world.get("b").relations["a"] = 50
+        resolve_orders(world, [Order("a", "propose_alliance", "b")])
+        self.assertIn("b", world.get("a").alliances)
+        self.assertIn("a", world.get("b").alliances)
+
+    def test_declare_war_breaks_existing_alliance(self):
+        world = make_world()
+        world.get("a").alliances.add("b")
+        world.get("b").alliances.add("a")
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertNotIn("b", world.get("a").alliances)
+
+    def test_sue_for_peace_rejected_when_actor_dominant(self):
+        world = make_world(a={"military": 90}, b={"military": 10})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        self.assertIn("b", world.get("a").at_war_with)
+
+    def test_sue_for_peace_accepted_when_not_dominant(self):
+        world = make_world(a={"military": 40}, b={"military": 40})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        self.assertNotIn("b", world.get("a").at_war_with)
+
+    def test_sue_for_peace_accepted_on_mutual_exhaustion(self):
+        # Both militaries ground down to zero: neither is "losing" relative
+        # to the other, but the stalemate should still resolve to peace
+        # instead of persisting forever.
+        world = make_world(a={"military": 0}, b={"military": 0})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        self.assertNotIn("b", world.get("a").at_war_with)
+
+    def test_peace_sets_a_truce_blocking_immediate_re_declaration(self):
+        world = make_world(a={"military": 40}, b={"military": 40})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        world.turn = 10
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
+        self.assertNotIn("declare_war", types)
+
+    def test_truce_expires_after_its_duration(self):
+        world = make_world(a={"military": 40}, b={"military": 40})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        world.turn = 10
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        world.turn = world.get("a").truce_until["b"]
+        types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
+        self.assertIn("declare_war", types)
+
+    def test_build_military_converts_economy(self):
+        world = make_world(a={"economy": 50, "military": 10})
+        resolve_orders(world, [Order("a", "build_military", None)])
+        self.assertLess(world.get("a").economy, 50)
+        self.assertGreater(world.get("a").military, 10)
+
+    def test_invest_economy_raises_economic_potential(self):
+        world = make_world()
+        before = world.get("a").economic_potential
+        resolve_orders(world, [Order("a", "invest_economy", None)])
+        self.assertGreater(world.get("a").economic_potential, before)
+
+    def test_resolution_order_diplomacy_before_military(self):
+        # An alliance formed this turn should still be broken by a
+        # simultaneous declare_war on the same target (military resolves
+        # after diplomacy, per PRIORITY), proving priority ordering works.
+        world = make_world()
+        world.get("a").relations["b"] = 50
+        world.get("b").relations["a"] = 50
+        resolve_orders(world, [
+            Order("a", "propose_alliance", "b"),
+            Order("a", "declare_war", "b"),
+        ])
+        self.assertNotIn("b", world.get("a").alliances)
+        self.assertIn("b", world.get("a").at_war_with)
+
+
+class TestThirdPartyReactions(unittest.TestCase):
+    def test_ally_of_target_condemns_actor_when_war_declared(self):
+        world = make_world_with_bystander()
+        world.get("c").alliances.add("b")
+        world.get("b").alliances.add("c")
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertLess(world.get("c").relation("a"), 0)
+        self.assertLess(world.get("a").relation("c"), 0)
+
+    def test_ally_of_target_invokes_article_5_and_joins_the_war(self):
+        # Alliances are mutual-defense pacts: attacking one member is
+        # treated as attacking the whole bloc, so the ally doesn't just
+        # disapprove -- it actually enters the war against the aggressor.
+        world = make_world_with_bystander()
+        world.get("c").alliances.add("b")
+        world.get("b").alliances.add("c")
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertIn("a", world.get("c").at_war_with)
+        self.assertIn("c", world.get("a").at_war_with)
+
+    def test_multiple_allies_all_join_a_war_on_a_shared_member(self):
+        a = Nation(id="a", name="A")
+        b = Nation(id="b", name="B")
+        c = Nation(id="c", name="C")
+        d = Nation(id="d", name="D")
+        for x, y in ((b, c), (b, d), (c, d)):
+            x.alliances.add(y.id)
+            y.alliances.add(x.id)
+        world = World(nations={"a": a, "b": b, "c": c, "d": d})
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertIn("a", world.get("c").at_war_with)
+        self.assertIn("a", world.get("d").at_war_with)
+
+    def test_ally_joining_war_does_not_break_its_own_alliance_with_target(self):
+        world = make_world_with_bystander()
+        world.get("c").alliances.add("b")
+        world.get("b").alliances.add("c")
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertIn("b", world.get("c").alliances)
+        self.assertIn("c", world.get("b").alliances)
+
+    def test_ally_of_actor_turns_on_target_when_war_declared(self):
+        world = make_world_with_bystander()
+        world.get("c").alliances.add("a")
+        world.get("a").alliances.add("c")
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertLess(world.get("c").relation("b"), 0)
+
+    def test_unrelated_bystander_unaffected_by_war(self):
+        world = make_world_with_bystander()
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertEqual(world.get("c").relation("a"), 0)
+        self.assertEqual(world.get("c").relation("b"), 0)
+
+    def test_ally_of_embargo_target_cools_on_embargoer(self):
+        world = make_world_with_bystander()
+        world.get("c").alliances.add("b")
+        world.get("b").alliances.add("c")
+        resolve_orders(world, [Order("a", "impose_embargo", "b")])
+        self.assertLess(world.get("c").relation("a"), 0)
+
+    def test_rival_of_new_alliance_member_grows_wary(self):
+        world = make_world_with_bystander()
+        world.get("a").relations["b"] = 50
+        world.get("b").relations["a"] = 50
+        world.get("c").relations["a"] = -50
+        world.get("a").relations["c"] = -50
+        resolve_orders(world, [Order("a", "propose_alliance", "b")])
+        self.assertLess(world.get("c").relation("b"), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
