@@ -1,5 +1,6 @@
 """Interactive terminal game loop. No AI/LLM calls: the world advances via
-worldsim.engine, which is pure deterministic arithmetic."""
+worldsim.engine, which is pure deterministic arithmetic, and player intent
+is parsed by worldsim.parser's fixed keyword rules -- not a language model."""
 from __future__ import annotations
 
 import random
@@ -7,6 +8,7 @@ import random
 from .engine import game_status, run_turn
 from .models import World
 from .orders import Order, legal_orders
+from .parser import parse_command
 from .scenarios import default_world, list_nation_ids
 
 VALID_NATION_IDS = set(list_nation_ids())
@@ -17,7 +19,11 @@ MAX_TURNS = 100
 def print_status(world: World, player_id: str) -> None:
     p = world.get(player_id)
     print(f"\n=== Turn {world.turn} — {p.name} ===")
-    print(f"Stability {p.stability:.0f} | Military {p.military:.0f} | Economy {p.economy:.0f}")
+    print(
+        f"Stability {p.stability:.0f} | Military {p.military:.0f} | "
+        f"Economy {p.economy:.0f} | Public opinion {p.public_opinion:.0f}"
+    )
+    print(f"Sectors: {{{', '.join(f'{k}: {v:.0f}' for k, v in p.sectors.items())}}}")
     print(f"Resources: {{{', '.join(f'{k}: {v:.0f}' for k, v in p.resources.items())}}}")
     if p.alliances:
         print(f"Allies: {', '.join(world.get(a).name for a in p.alliances)}")
@@ -33,12 +39,15 @@ def print_status(world: World, player_id: str) -> None:
 
 def choose_player_order(world: World, player_id: str) -> Order:
     options = list(legal_orders(world, player_id))
-    # Trim the (very long) list for readability: show non-targeted orders
-    # plus targeted orders against nations with the most notable relations.
     print("\nChoose an order:")
     for i, order in enumerate(options):
-        target = f" -> {world.get(order.target_id).name}" if order.target_id else ""
-        print(f"  {i}: {order.type}{target}")
+        if order.target_id:
+            label = f"{order.type} -> {world.get(order.target_id).name}"
+        elif order.detail:
+            label = f"{order.type} ({order.detail})"
+        else:
+            label = order.type
+        print(f"  {i}: {label}")
     while True:
         raw = input("Order number: ").strip()
         if raw.isdigit() and 0 <= int(raw) < len(options):
@@ -46,9 +55,23 @@ def choose_player_order(world: World, player_id: str) -> Order:
         print("Invalid choice, try again.")
 
 
+def get_player_order(world: World, player_id: str) -> Order:
+    """Free text is the primary interface: type anything, including erratic
+    or unrealistic statements ("demand a refund of the Louisiana Purchase")
+    -- it always resolves to something. Type 'menu' for a numbered list of
+    known, well-defined actions instead."""
+    text = input("\nWhat does your nation do? (or 'menu' for a list): ").strip()
+    if not text:
+        return Order(player_id, "pass")
+    if text.lower() == "menu":
+        return choose_player_order(world, player_id)
+    return parse_command(world, player_id, text)
+
+
 def main() -> None:
     print("=== Concert of Nations ===")
     print("A deterministic, offline geopolitical strategy sim (no AI required).")
+    print("Type what your nation does in plain English -- 'menu' lists known actions.")
     print("Available nations: " + ", ".join(list_nation_ids()))
     player_id = input("Choose your nation [usa]: ").strip() or "usa"
     while player_id not in VALID_NATION_IDS:
@@ -61,7 +84,7 @@ def main() -> None:
     status = None
     while status is None:
         print_status(world, player_id)
-        order = choose_player_order(world, player_id)
+        order = get_player_order(world, player_id)
         run_turn(world, [order], rng)
         for line in world.event_log[-5:]:
             print(line)

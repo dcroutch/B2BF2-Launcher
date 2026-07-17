@@ -35,11 +35,41 @@ cd world-simulator
 python3 run.py
 ```
 
-You'll pick a nation, then each turn choose one order (build military,
-invest in the economy, improve relations, propose an alliance, impose an
-embargo, declare war, sue for peace, ...). The other nine nations pick their
-own orders using the same deterministic scoring rules, seeded for
-reproducible runs.
+Type what your nation does in plain English each turn — "invade Iran",
+"embargo Russia", "invest in our technology sector", "propose an alliance
+with Japan" — or type `menu` for a numbered list of well-defined actions.
+Free text is parsed by a **fixed keyword list** (`worldsim/parser.py`), not
+an LLM, so it's instant and deterministic; anything it doesn't recognize —
+including deliberately unrealistic input like "demand France refund the
+Louisiana Purchase" — still resolves to *something* via a sentiment-scored
+`wildcard` reaction instead of being silently dropped.
+
+**You can only ever act as your own nation.** The parser structurally
+returns `Order(actor_id=player_id, ...)` no matter what the text says — "make
+China declare war on Russia" cannot make China do anything; it's downgraded
+to a rhetorical statement *by your own nation, about China*, never an order
+carried out *by* China. See `tests/test_parser.py::TestActorLockGuarantee`.
+
+All 27 other nations pick their own orders every turn using the same
+deterministic scoring rules (`worldsim/ai.py`), seeded for reproducible runs.
+
+## Beyond the core loop
+
+- **Public opinion** (`Nation.public_opinion`) is a distinct stat from
+  stability: wars, embargoes suffered, humiliating peace terms, and even
+  wildcard rhetoric shift it, and it feeds back into stability — a nation
+  can be objectively prosperous and still destabilize if it governs against
+  its own public.
+- **Sectors and commodities**: each nation has five domestic sectors
+  (agriculture, industry, energy, technology, services) and five raw
+  materials (energy, food, metals, oil, tech components), seeded with
+  real-world-flavored profiles (Saudi Arabia/Russia lead oil, Japan/South
+  Korea lead technology, Brazil/Argentina lead food, ...). `invest_sector`
+  grows a specific sector and its commodity.
+- **Global commodity markets** (`World.market_prices`): each commodity's
+  price is a shared, world-wide supply/demand index — a nation with a
+  surplus of a scarce commodity benefits as an exporter; a nation short on
+  it suffers as an importer. Everyone trades in the same market.
 
 ## Run tests
 
@@ -50,12 +80,16 @@ python3 -m unittest discover -s tests -v
 
 ## Layout
 
-- `worldsim/models.py` — `Nation` / `World` data model.
-- `worldsim/orders.py` — the fixed order menu and how each order resolves.
+- `worldsim/models.py` — `Nation` / `World` data model (stats, sectors,
+  commodities, market prices).
+- `worldsim/orders.py` — the order menu (including `invest_sector` and the
+  `wildcard` catch-all) and how each order resolves.
+- `worldsim/parser.py` — deterministic free-text -> Order parser, with the
+  actor-lock guarantee.
 - `worldsim/ai.py` — deterministic scoring heuristics for AI-controlled nations.
 - `worldsim/engine.py` — turn loop: gather orders, resolve, apply passive
-  effects (war exhaustion, embargoes, stability drift, minor events), check
-  win/loss.
+  effects (war exhaustion, embargoes, public opinion, market prices, minor
+  events), check win/loss.
 - `worldsim/scenarios.py` — starting-world preset (data only).
-- `worldsim/cli.py` — interactive terminal loop.
+- `worldsim/cli.py` — interactive terminal loop (free text, with a `menu` fallback).
 - `tests/` — unit tests per module.

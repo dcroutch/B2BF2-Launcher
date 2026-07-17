@@ -8,12 +8,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from .models import World
+from .models import SECTOR_COMMODITY, SECTOR_TYPES, World
 
 ORDER_TYPES = (
     "pass",
     "build_military",
     "invest_economy",
+    "invest_sector",
     "improve_relations",
     "propose_alliance",
     "break_alliance",
@@ -21,6 +22,10 @@ ORDER_TYPES = (
     "impose_embargo",
     "declare_war",
     "sue_for_peace",
+    # A catch-all for erratic, chaotic, or otherwise unmodeled player intent
+    # (see worldsim/parser.py) -- still resolves deterministically, just
+    # through a sentiment-scored generic gesture instead of a fixed effect.
+    "wildcard",
 )
 
 # Lower number resolves first.
@@ -31,7 +36,9 @@ PRIORITY = {
     "trade_pact": 0,
     "impose_embargo": 0,
     "sue_for_peace": 0,
+    "wildcard": 0,
     "invest_economy": 1,
+    "invest_sector": 1,
     "build_military": 1,
     "declare_war": 2,
     "pass": 3,
@@ -43,6 +50,9 @@ class Order:
     actor_id: str
     type: str
     target_id: Optional[str] = None
+    # Free-form extra parameter: sector name for invest_sector, raw player
+    # text for wildcard. Unused by every other order type.
+    detail: Optional[str] = None
 
     def __post_init__(self):
         if self.type not in ORDER_TYPES:
@@ -51,6 +61,8 @@ class Order:
             raise ValueError(f"Order {self.type} requires a target_id")
         if self.target_id is not None and self.target_id == self.actor_id:
             raise ValueError(f"Order {self.type} cannot target its own actor")
+        if self.type == "invest_sector" and self.detail not in SECTOR_TYPES:
+            raise ValueError(f"invest_sector requires detail to be one of {SECTOR_TYPES}")
 
 
 TARGETED_ORDERS = {
@@ -74,6 +86,14 @@ BREAK_ALLIANCE_RELATION_HIT = -15
 # next turn, producing a war/peace flicker instead of a real ceasefire.
 TRUCE_DURATION = 5
 
+WAR_OPINION_HIT_JUSTIFIED = -3
+WAR_OPINION_HIT_UNPROVOKED = -10
+RALLY_AROUND_FLAG_OPINION_BOOST = 6
+EMBARGO_RECEIVED_OPINION_HIT = -4
+ALLIANCE_OPINION_BOOST = 3
+PEACE_HUMILIATION_OPINION_HIT = -6
+PEACE_RELIEF_OPINION_BOOST = 2
+
 
 def legal_orders(world: World, actor_id: str):
     """Yield every legal Order the given nation could issue this turn."""
@@ -81,6 +101,8 @@ def legal_orders(world: World, actor_id: str):
     yield Order(actor_id, "pass")
     yield Order(actor_id, "build_military")
     yield Order(actor_id, "invest_economy")
+    for sector in SECTOR_TYPES:
+        yield Order(actor_id, "invest_sector", detail=sector)
     for other in world.alive_nations():
         if other.id == actor_id:
             continue
@@ -192,6 +214,19 @@ def _resolve_invest_economy(world: World, order: Order) -> None:
     actor.economic_potential += 0.6
 
 
+def _resolve_invest_sector(world: World, order: Order) -> None:
+    actor = world.get(order.actor_id)
+    sector = order.detail
+    cost = min(10.0, actor.economy * 0.15)
+    actor.economy -= cost
+    actor.sectors[sector] = actor.sectors.get(sector, 0.0) + cost
+    commodity = SECTOR_COMMODITY.get(sector)
+    if commodity:
+        actor.resources[commodity] = actor.resources.get(commodity, 0.0) + 5
+    sector_label = sector.replace("_sector", "").replace("_", " ")
+    world.log(f"{actor.name} invests in its {sector_label} sector.")
+
+
 def _resolve_improve_relations(world: World, order: Order) -> None:
     actor = world.get(order.actor_id)
     target = world.get(order.target_id)
@@ -204,6 +239,8 @@ def _resolve_propose_alliance(world: World, order: Order) -> None:
     if actor.relation(target.id) >= ALLIANCE_RELATION_THRESHOLD and target.relation(actor.id) >= ALLIANCE_RELATION_THRESHOLD:
         actor.alliances.add(target.id)
         target.alliances.add(actor.id)
+        actor.public_opinion += ALLIANCE_OPINION_BOOST
+        target.public_opinion += ALLIANCE_OPINION_BOOST
         world.log(f"{actor.name} and {target.name} form an alliance.")
         _react_third_parties(world, actor, target, "alliance")
 
@@ -234,6 +271,7 @@ def _resolve_impose_embargo(world: World, order: Order) -> None:
     actor.trade_pacts.discard(target.id)
     target.trade_pacts.discard(actor.id)
     _shift_relations(actor, target, EMBARGO_RELATION_HIT)
+    target.public_opinion += EMBARGO_RECEIVED_OPINION_HIT
     world.log(f"{actor.name} imposes an embargo on {target.name}.")
     _react_third_parties(world, actor, target, "embargo")
 
@@ -243,8 +281,17 @@ def _resolve_declare_war(world: World, order: Order) -> None:
     target = world.get(order.target_id)
     if target.id in actor.at_war_with:
         return
+    # Public opinion: a "justified" war against an already-hostile rival
+    # costs the aggressor little; an unprovoked war against a nation that
+    # wasn't already a rival costs a lot more. The attacked side always
+    # gets a short-lived rally-around-the-flag boost.
+    pre_war_hostility = actor.relation(target.id)
     _enter_war(world, actor, target)
     _shift_relations(actor, target, WAR_RELATION_HIT)
+    actor.public_opinion += (
+        WAR_OPINION_HIT_JUSTIFIED if pre_war_hostility <= -50 else WAR_OPINION_HIT_UNPROVOKED
+    )
+    target.public_opinion += RALLY_AROUND_FLAG_OPINION_BOOST
     world.log(f"{actor.name} declares war on {target.name}!")
     _react_third_parties(world, actor, target, "war")
 
@@ -265,15 +312,84 @@ def _resolve_sue_for_peace(world: World, order: Order) -> None:
         target.at_war_with.discard(actor.id)
         actor.truce_until[target.id] = world.turn + TRUCE_DURATION
         target.truce_until[actor.id] = world.turn + TRUCE_DURATION
+        # Suing for peace while losing reads as humiliation; a mutual,
+        # exhausted stalemate is just relief.
+        losing = actor.military < target.military * 0.8
+        actor.public_opinion += PEACE_HUMILIATION_OPINION_HIT if losing else PEACE_RELIEF_OPINION_BOOST
+        target.public_opinion += PEACE_RELIEF_OPINION_BOOST
         world.log(f"{actor.name} and {target.name} agree to a ceasefire.")
     else:
         world.log(f"{target.name} rejects {actor.name}'s peace offer.")
+
+
+# A lightweight, deterministic sentiment lexicon -- not a language model,
+# just a fixed word list -- so wildly unusual player input ("demand a
+# refund of the Louisiana Purchase") still gets a proportionate, legible
+# reaction instead of being silently ignored or crashing the parser.
+HOSTILE_WORDS = (
+    "demand", "threat", "ultimatum", "attack", "seize", "annex", "invade",
+    "destroy", "refund", "reparation", "punish", "conquer", "strike",
+    "bomb", "sanction", "humiliate", "dominate", "reject", "insult",
+)
+FRIENDLY_WORDS = (
+    "gift", "apolog", "support", "help", "praise", "honor", "celebrate",
+    "thank", "donate", "forgive", "welcome", "invite", "gratitude",
+    "friendship", "congratulat",
+)
+WILDCARD_RELATION_SCALE = -6
+WILDCARD_DOMESTIC_SCALE = 1.5
+WILDCARD_PROVOCATION_THRESHOLD = 2
+
+
+def _sentiment_magnitude(text: str) -> int:
+    """Crude, deterministic hostility score: positive = hostile, negative =
+    friendly, 0 = ambiguous/neutral. Clamped to [-3, 3]."""
+    lowered = text.lower()
+    hostile = sum(1 for w in HOSTILE_WORDS if w in lowered)
+    friendly = sum(1 for w in FRIENDLY_WORDS if w in lowered)
+    return max(-3, min(3, hostile - friendly))
+
+
+def _resolve_wildcard(world: World, order: Order) -> None:
+    """Resolve an unmodeled, erratic, or unrealistic player statement.
+
+    There's no fixed effect for "demand a refund of the Louisiana
+    Purchase" -- instead this scores the statement's tone with a fixed
+    word list and applies a proportionate, logged reaction. Chaotic input
+    is never ignored and never crashes; it always produces *some*
+    deterministic, in-world consequence.
+    """
+    actor = world.get(order.actor_id)
+    text = (order.detail or "").strip()
+    snippet = text if len(text) <= 70 else text[:67] + "..."
+    magnitude = _sentiment_magnitude(text)
+    target = world.get(order.target_id) if order.target_id else None
+
+    if target is None:
+        actor.public_opinion += magnitude * WILDCARD_DOMESTIC_SCALE
+        world.log(f"{actor.name}'s government makes an unusual public statement: \"{snippet}\"")
+        return
+
+    _shift_relations(actor, target, magnitude * WILDCARD_RELATION_SCALE)
+    if magnitude > 0:
+        world.log(f"{actor.name} makes an extraordinary demand of {target.name}: \"{snippet}\"")
+        world.log(f"{target.name} rebuffs the demand and relations sour.")
+        if magnitude >= WILDCARD_PROVOCATION_THRESHOLD:
+            _react_third_parties(world, actor, target, "embargo")
+            world.log(f"{target.name}'s allies take note of {actor.name}'s provocation.")
+    elif magnitude < 0:
+        world.log(f"{actor.name} extends an unusual goodwill gesture to {target.name}: \"{snippet}\"")
+        world.log(f"{target.name} is pleasantly surprised; relations warm slightly.")
+    else:
+        world.log(f"{actor.name} makes a puzzling statement toward {target.name}: \"{snippet}\"")
+        world.log(f"{target.name} isn't sure what to make of it.")
 
 
 RESOLVERS = {
     "pass": _resolve_pass,
     "build_military": _resolve_build_military,
     "invest_economy": _resolve_invest_economy,
+    "invest_sector": _resolve_invest_sector,
     "improve_relations": _resolve_improve_relations,
     "propose_alliance": _resolve_propose_alliance,
     "break_alliance": _resolve_break_alliance,
@@ -281,6 +397,7 @@ RESOLVERS = {
     "impose_embargo": _resolve_impose_embargo,
     "declare_war": _resolve_declare_war,
     "sue_for_peace": _resolve_sue_for_peace,
+    "wildcard": _resolve_wildcard,
 }
 
 

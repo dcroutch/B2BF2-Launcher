@@ -29,6 +29,10 @@ def score_order(world: World, order: Order) -> float:
         # More attractive the weaker the economy is.
         return 3.0 + (60 - actor.economy) * 0.05
 
+    if order.type == "invest_sector":
+        # Nations naturally shore up whichever sector is weakest.
+        return 2.0 + (50 - actor.sectors.get(order.detail, 40)) * 0.05
+
     if order.type == "improve_relations":
         # The worse relations are, the more there is to gain from fixing
         # them -- real reconciliation does happen eventually, so this never

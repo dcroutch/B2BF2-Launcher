@@ -162,6 +162,64 @@ world-simulator/
   run.py            # entry point: python run.py
 ```
 
+## Free text, the actor-lock guarantee, and chaotic input
+
+Pax Historia's biggest departure from a fixed menu is free-text orders. We
+now support that (`worldsim/parser.py`) without an LLM: a fixed, ordered
+keyword table maps phrases to order types, and a nation-alias lookup
+extracts the target. Two properties matter more than parsing accuracy:
+
+1. **The player can never issue an order for another nation.**
+   `parse_command(world, player_id, text)` has exactly one code path that
+   constructs an `Order`, and it always passes `player_id` as `actor_id` --
+   there is no branch anywhere that could set a different actor from text.
+   On top of that structural guarantee, text whose apparent subject is a
+   *different* nation ("China declares war on Russia") is detected (the
+   other nation's name appears before any recognized verb) and downgraded
+   to a `wildcard` order -- the player's own nation making a rhetorical
+   statement about China, never an order China carries out.
+2. **Nothing the player types is ever dropped or crashes the game.** If no
+   keyword matches (chaotic, erratic, or simply unrealistic input -- "demand
+   France refund the Louisiana Purchase") the input becomes a `wildcard`
+   order. `_resolve_wildcard` (orders.py) scores the raw text against a
+   small, fixed hostile/friendly word list and applies a proportionate,
+   logged reaction: relations shift toward whatever nation was named,
+   public opinion shifts if none was, and a strongly hostile wildcard
+   (score >= 2) triggers the same ally-solidarity reaction real embargoes
+   do. It's still 100% deterministic arithmetic -- just applied to
+   unstructured input instead of a fixed order type.
+
+## Public opinion, sectors, and commodities
+
+- **Public opinion** (`Nation.public_opinion`) is a second domestic stat,
+  independent of `stability`, that specific decisions move directly: an
+  unprovoked war costs far more opinion than one against an already-hostile
+  rival; the attacked side gets a short rally-around-the-flag boost; losing
+  a war and suing for peace is a humiliation hit; a new alliance is a
+  boost. It also drifts passively toward a target set by prosperity and
+  stability. It then feeds back into stability's own drift target -- so a
+  government that keeps winning "on paper" (strong economy) but has
+  alienated its public still destabilizes and can still collapse, through
+  the same single collapse path as everything else (no separate "the
+  public revolts" special case).
+- **Sectors** (`Nation.sectors`: agriculture, industry, energy, technology,
+  services) are a second, slower lever on economy alongside
+  `economic_potential`. `invest_sector` (reachable via free text, e.g.
+  "invest in our technology sector", or the numbered menu) grows one
+  sector and produces the raw material it depends on
+  (`SECTOR_COMMODITY` in models.py).
+- **Commodities and markets**: `RESOURCE_TYPES` covers five major raw
+  materials (energy, food, metals, oil, tech components). `World.market_prices`
+  is a single shared relative-price index per commodity, driven by total
+  global stockpiles each turn (scarce -> price up, abundant -> price down).
+  A nation's economy is nudged by whether it holds a surplus or deficit of
+  each commodity relative to that shared price -- a real (if simplified)
+  supply-and-demand market every nation trades in, not a per-nation number.
+  `scenarios.py` seeds real-world-flavored starting profiles (Saudi
+  Arabia/Russia lead oil, Japan/South Korea lead technology, Brazil/
+  Argentina lead food, ...) so nations start economically differentiated,
+  not just militarily/diplomatically.
+
 ## Testing strategy
 
 Unit tests per module (models validity, each order's resolution effect in

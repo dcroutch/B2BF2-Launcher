@@ -10,6 +10,44 @@ from __future__ import annotations
 
 from .models import Nation, World
 
+# Per-nation commodity/sector profiles for the nations most associated with a
+# given raw material or industry in the real world -- everyone else keeps
+# the flat 50/40 defaults. (nation_id -> {resource_or_sector: value})
+RESOURCE_PROFILES = {
+    "saudi_arabia": {"oil": 140},
+    "russia": {"oil": 120, "energy": 130, "metals": 90},
+    "usa": {"oil": 90, "tech_components": 110, "food": 90},
+    "china": {"metals": 110, "tech_components": 100, "energy": 70},
+    "australia": {"metals": 130, "food": 90},
+    "canada": {"energy": 100, "food": 100, "metals": 90},
+    "brazil": {"food": 120, "metals": 80},
+    "iran": {"oil": 110, "energy": 90},
+    "nigeria": {"oil": 100},
+    "vietnam": {"food": 90},
+    "argentina": {"food": 110},
+    "south_korea": {"tech_components": 120},
+    "japan": {"tech_components": 130},
+    "germany": {"tech_components": 100, "metals": 80},
+    "india": {"food": 90, "tech_components": 80},
+}
+
+SECTOR_PROFILES = {
+    "usa": {"technology": 80, "services": 75, "industry": 60},
+    "china": {"industry": 85, "technology": 70, "agriculture": 55},
+    "japan": {"technology": 85, "industry": 65},
+    "south_korea": {"technology": 80, "industry": 65},
+    "germany": {"industry": 75, "technology": 65},
+    "saudi_arabia": {"energy_sector": 90, "services": 50},
+    "russia": {"energy_sector": 85, "industry": 60},
+    "brazil": {"agriculture": 75, "industry": 45},
+    "australia": {"agriculture": 65, "industry": 50},
+    "canada": {"agriculture": 60, "energy_sector": 70},
+    "india": {"services": 60, "agriculture": 55, "technology": 50},
+    "nigeria": {"energy_sector": 60, "agriculture": 45},
+    "vietnam": {"agriculture": 60, "industry": 55},
+    "argentina": {"agriculture": 70},
+}
+
 # id, name, stability, military, economy (0-100 proxies, not literal GDP/army
 # figures -- relative ordering is what matters for gameplay balance).
 MAJOR_POWERS = [
@@ -100,7 +138,7 @@ def default_world(player_id: str = "usa", seed: int = 42) -> World:
 
     nations = {}
     for nid, name, stability, military, economy in DEFAULT_NATIONS:
-        nations[nid] = Nation(
+        nation = Nation(
             id=nid,
             name=name,
             stability=float(stability),
@@ -108,6 +146,11 @@ def default_world(player_id: str = "usa", seed: int = 42) -> World:
             economy=float(economy),
             is_player=(nid == player_id),
         )
+        for resource, value in RESOURCE_PROFILES.get(nid, {}).items():
+            nation.resources[resource] = float(value)
+        for sector, value in SECTOR_PROFILES.get(nid, {}).items():
+            nation.sectors[sector] = float(value)
+        nations[nid] = nation
 
     for i, a_id in enumerate(NATO_BLOC):
         for b_id in NATO_BLOC[i + 1:]:
