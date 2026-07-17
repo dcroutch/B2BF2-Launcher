@@ -24,7 +24,35 @@ class TestRunTurn(unittest.TestCase):
                 self.assertGreaterEqual(n.military, 0)
                 self.assertLessEqual(n.military, 100)
                 self.assertGreaterEqual(n.economy, 0)
-                self.assertLessEqual(n.economy, 100)
+                # Economy's ceiling is potential-relative (potential + 15
+                # headroom), not a flat 100 -- see models.Nation.clamp_stats.
+                self.assertLessEqual(n.economy, n.economic_potential + 15)
+                self.assertGreaterEqual(n.economic_potential, 0)
+                self.assertLessEqual(n.economic_potential, 100)
+
+    def test_economies_stay_differentiated_instead_of_converging(self):
+        # Regression test for the old bug where every nation's economy
+        # monotonically climbed to the same flat global cap regardless of
+        # starting strength or events, wiping out all differentiation.
+        world = default_world(seed=5)
+        rng = random.Random(5)
+        for _ in range(80):
+            run_turn(world, [Order("usa", "pass")], rng)
+        economies = [n.economy for n in world.alive_nations()]
+        self.assertGreater(max(economies) - min(economies), 20)
+        # A nation ground down by war/sanctions should end up well below
+        # its own long-run potential, not clamped to a shared global cap.
+        russia = world.get("russia")
+        self.assertLess(russia.economy, russia.economic_potential - 20)
+
+    def test_relations_heal_toward_neutral_over_time_when_at_peace(self):
+        world = default_world(seed=2)
+        world.get("usa").relations["china"] = -90
+        world.get("china").relations["usa"] = -90
+        rng = random.Random(2)
+        for _ in range(30):
+            run_turn(world, [Order("usa", "pass")], rng)
+        self.assertGreater(world.get("usa").relation("china"), -90)
 
     def test_simulation_is_deterministic_given_seed(self):
         w1 = default_world(seed=99)

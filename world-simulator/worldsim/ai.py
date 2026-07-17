@@ -30,10 +30,10 @@ def score_order(world: World, order: Order) -> float:
         return 3.0 + (60 - actor.economy) * 0.05
 
     if order.type == "improve_relations":
-        # Prioritize neutral/slightly-negative relations we can still fix.
+        # The worse relations are, the more there is to gain from fixing
+        # them -- real reconciliation does happen eventually, so this never
+        # bottoms out to "not worth it" the way it used to.
         rel = actor.relation(target.id)
-        if rel < -50:
-            return -1  # too far gone, not worth it
         return 1.0 + (50 - rel) * 0.02
 
     if order.type == "propose_alliance":
@@ -46,8 +46,12 @@ def score_order(world: World, order: Order) -> float:
         return (-rel - 40) * 0.1 if rel < -40 else -10
 
     if order.type == "trade_pact":
+        # Diminishing returns once a nation already has several pacts, so
+        # trade doesn't monopolize every nation's order every single turn
+        # once relations across the board turn positive.
         mutual_relation = min(actor.relation(target.id), target.relation(actor.id))
-        return 2.0 + mutual_relation * 0.03 + (60 - actor.economy) * 0.02
+        saturation_penalty = max(0, len(actor.trade_pacts) - 3) * 1.5
+        return 2.0 + mutual_relation * 0.03 + (60 - actor.economy) * 0.02 - saturation_penalty
 
     if order.type == "impose_embargo":
         rel = actor.relation(target.id)
@@ -63,10 +67,12 @@ def score_order(world: World, order: Order) -> float:
         return score if stability_ok else score - 15
 
     if order.type == "sue_for_peace":
-        # Want peace when losing (weaker military) or stability is low.
+        # Want peace when losing (weaker military), stability is low, or
+        # both sides have fought each other to a standstill.
         losing = actor.military < target.military * 0.8
         exhausted = actor.stability < 35
-        return 6.0 if (losing or exhausted) else -5
+        mutually_exhausted = actor.military < 15 and target.military < 15
+        return 6.0 if (losing or exhausted or mutually_exhausted) else -5
 
     return -100  # unknown order types never win
 

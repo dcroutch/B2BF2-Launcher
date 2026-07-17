@@ -61,9 +61,23 @@ def _apply_passive_effects(world: World, rng: random.Random) -> None:
         # Trade pacts give a small mutual boost.
         nation.economy += 0.5 * len(nation.trade_pacts & alive_ids)
 
+        # Economy drifts toward this nation's long-run potential (raised
+        # permanently by sustained invest_economy orders). Without this,
+        # trade/investment only ever push economy upward and every nation
+        # eventually converges on the same global cap; the drift keeps
+        # nations differentiated by how much they've actually built up.
+        nation.economy += (nation.economic_potential - nation.economy) * 0.05
+
         # Stability drifts toward a target based on prosperity.
         target_stability = 40 + nation.economy * 0.3
         nation.stability += (target_stability - nation.stability) * 0.05
+
+        # Relations slowly heal toward neutral over time (grudges fade)
+        # unless the two nations are still actively at war.
+        for other_id in list(nation.relations.keys()):
+            if other_id in nation.at_war_with:
+                continue
+            nation.relations[other_id] += (0 - nation.relations[other_id]) * 0.02
 
         # Resources regenerate slowly if not embargoed.
         for r in nation.resources:

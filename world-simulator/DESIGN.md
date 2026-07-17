@@ -56,6 +56,33 @@ visibly ripple into new alliances, embargoes, and eventually wars between
 nations that were never involved in the original conflict. That's the
 "emergent, reactive world" property, produced entirely by arithmetic.
 
+## Tuning fixes (post-playtest)
+
+A long simulated playtest surfaced three problems and each was fixed at the
+mechanics level, not by special-casing:
+
+- **Economies converging to a flat cap.** Every nation's economy monotonically
+  climbed to the same global ceiling regardless of starting strength, erasing
+  all differentiation. Fixed by giving each nation an `economic_potential`
+  (a long-run ceiling, raised permanently by sustained `invest_economy`
+  orders) and clamping `economy` to `economic_potential + 15`, not a flat 100
+  -- so a nation's economic strength now reflects what it actually built up
+  or lost to war/sanctions, not a shared cap.
+- **Wars stuck in a permanent stalemate at zero military.** `sue_for_peace`
+  only fired when one side was clearly losing, so two nations ground down to
+  0 military each just stayed at war forever. Fixed by also accepting peace
+  on mutual exhaustion (both militaries below 15).
+- **War/peace flicker.** Even after peace, relations stayed catastrophically
+  negative (nothing healed them), and `improve_relations` scored as "not
+  worth it" once relations were very negative -- so nations flipped between
+  declaring war and suing for peace almost every turn. Fixed three ways:
+  relations now slowly heal toward neutral each turn when not at war;
+  `improve_relations` no longer bottoms out to a fixed penalty at very
+  negative relations; and a successful peace now sets a `truce_until` turn
+  on both sides, blocking a fresh `declare_war` between them for
+  `TRUCE_DURATION` (5) turns -- a real ceasefire instead of an instant
+  re-declaration.
+
 ## Core model
 
 **Nation** attributes: `stability` (0-100), `military` (0-100),

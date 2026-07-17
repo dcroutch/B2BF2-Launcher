@@ -68,6 +68,12 @@ WAR_RELATION_HIT = -60
 EMBARGO_RELATION_HIT = -20
 BREAK_ALLIANCE_RELATION_HIT = -15
 
+# How many turns a ceasefire (from a successful sue_for_peace) blocks a fresh
+# declare_war between the same two nations -- without this, two nations
+# whose relations are still deeply negative just re-declare war the very
+# next turn, producing a war/peace flicker instead of a real ceasefire.
+TRUCE_DURATION = 5
+
 
 def legal_orders(world: World, actor_id: str):
     """Yield every legal Order the given nation could issue this turn."""
@@ -92,7 +98,8 @@ def legal_orders(world: World, actor_id: str):
                 yield Order(actor_id, "trade_pact", other.id)
             if other.id not in actor.embargoes_against:
                 yield Order(actor_id, "impose_embargo", other.id)
-            yield Order(actor_id, "declare_war", other.id)
+            if world.turn >= actor.truce_until.get(other.id, -1):
+                yield Order(actor_id, "declare_war", other.id)
         else:
             yield Order(actor_id, "sue_for_peace", other.id)
 
@@ -179,6 +186,10 @@ def _resolve_invest_economy(world: World, order: Order) -> None:
     actor = world.get(order.actor_id)
     actor.economy += 5 + actor.resources.get("energy", 0) * 0.02
     actor.stability += 0.5
+    # Sustained investment raises the nation's long-run ceiling, not just
+    # its current economy -- otherwise every nation eventually converges on
+    # the same global cap regardless of how much it actually invested.
+    actor.economic_potential += 0.6
 
 
 def _resolve_improve_relations(world: World, order: Order) -> None:
@@ -243,14 +254,18 @@ def _resolve_sue_for_peace(world: World, order: Order) -> None:
     target = world.get(order.target_id)
     if target.id not in actor.at_war_with:
         return
-    # Peace only sticks if the target also wants it (weaker/exhausted) or was
-    # the one who proposed. We approximate willingness with a stability check:
-    # a side accepts peace if it isn't clearly winning.
+    # Peace sticks if the target isn't clearly winning, or if both sides
+    # have fought each other to a standstill (near-zero militaries) -- a
+    # strict "is actor losing" check alone never fires on a tied stalemate,
+    # which otherwise leaves wars stuck at 0 military forever.
     actor_winning = actor.military > target.military * 1.3
-    if not actor_winning:
+    mutually_exhausted = actor.military < 15 and target.military < 15
+    if not actor_winning or mutually_exhausted:
         actor.at_war_with.discard(target.id)
         target.at_war_with.discard(actor.id)
-        world.log(f"{actor.name} and {target.name} agree to peace.")
+        actor.truce_until[target.id] = world.turn + TRUCE_DURATION
+        target.truce_until[actor.id] = world.turn + TRUCE_DURATION
+        world.log(f"{actor.name} and {target.name} agree to a ceasefire.")
     else:
         world.log(f"{target.name} rejects {actor.name}'s peace offer.")
 

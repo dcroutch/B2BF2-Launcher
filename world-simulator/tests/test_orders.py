@@ -108,11 +108,46 @@ class TestResolveOrders(unittest.TestCase):
         resolve_orders(world, [Order("a", "sue_for_peace", "b")])
         self.assertNotIn("b", world.get("a").at_war_with)
 
+    def test_sue_for_peace_accepted_on_mutual_exhaustion(self):
+        # Both militaries ground down to zero: neither is "losing" relative
+        # to the other, but the stalemate should still resolve to peace
+        # instead of persisting forever.
+        world = make_world(a={"military": 0}, b={"military": 0})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        self.assertNotIn("b", world.get("a").at_war_with)
+
+    def test_peace_sets_a_truce_blocking_immediate_re_declaration(self):
+        world = make_world(a={"military": 40}, b={"military": 40})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        world.turn = 10
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
+        self.assertNotIn("declare_war", types)
+
+    def test_truce_expires_after_its_duration(self):
+        world = make_world(a={"military": 40}, b={"military": 40})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        world.turn = 10
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        world.turn = world.get("a").truce_until["b"]
+        types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
+        self.assertIn("declare_war", types)
+
     def test_build_military_converts_economy(self):
         world = make_world(a={"economy": 50, "military": 10})
         resolve_orders(world, [Order("a", "build_military", None)])
         self.assertLess(world.get("a").economy, 50)
         self.assertGreater(world.get("a").military, 10)
+
+    def test_invest_economy_raises_economic_potential(self):
+        world = make_world()
+        before = world.get("a").economic_potential
+        resolve_orders(world, [Order("a", "invest_economy", None)])
+        self.assertGreater(world.get("a").economic_potential, before)
 
     def test_resolution_order_diplomacy_before_military(self):
         # An alliance formed this turn should still be broken by a

@@ -28,8 +28,17 @@ class TestNation(unittest.TestCase):
         n.clamp_stats()
         self.assertEqual(n.stability, 100)
         self.assertEqual(n.military, 0)
-        self.assertEqual(n.economy, 100)
+        # Economy is capped relative to this nation's own economic_potential
+        # (clamped to 100), not a flat 100 -- see test_economy_ceiling_is_
+        # relative_to_economic_potential for the differentiation this buys.
+        self.assertEqual(n.economy, 115)
         self.assertEqual(n.resources["food"], 200)
+
+    def test_economy_ceiling_is_relative_to_economic_potential(self):
+        n = Nation(id="a", name="A", economy=40, economic_potential=40)
+        n.economy = 1000
+        n.clamp_stats()
+        self.assertEqual(n.economy, 55)  # potential (40) + 15 headroom
 
     def test_clamp_stats_bounds_relations(self):
         n = Nation(id="a", name="A")
