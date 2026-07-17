@@ -97,11 +97,49 @@ def legal_orders(world: World, actor_id: str):
             yield Order(actor_id, "sue_for_peace", other.id)
 
 
+ALLY_SOLIDARITY_RELATION_HIT = -20
+ALLY_BACKING_RELATION_HIT = -15
+EMBARGO_SOLIDARITY_RELATION_HIT = -8
+RIVAL_BLOC_WARINESS_HIT = -3
+RIVAL_BLOC_THRESHOLD = -30
+
+
 def _shift_relations(actor, target, delta: float) -> None:
-    """Apply a mutual relation delta between two nations (clamped later by
-    Nation.clamp_stats, called after every order resolves)."""
+    """Apply a mutual relation delta between two nations and clamp both
+    sides immediately, so every caller (direct order or third-party
+    reaction) leaves relations in a valid, bounded state."""
     actor.relations[target.id] = actor.relation(target.id) + delta
     target.relations[actor.id] = target.relation(actor.id) + delta
+    actor.clamp_stats()
+    target.clamp_stats()
+
+
+def _react_third_parties(world: World, actor, target, event: str) -> None:
+    """The rest of the world doesn't just watch: allies and rivals of the
+    two participants shift their own stance in response to what just
+    happened. This is what makes the simulation feel alive without any
+    AI/LLM call -- it's a fixed rule applied to every bystander nation.
+    """
+    for other in world.alive_nations():
+        if other.id in (actor.id, target.id):
+            continue
+
+        if event == "war":
+            if target.id in other.alliances:
+                _shift_relations(other, actor, ALLY_SOLIDARITY_RELATION_HIT)
+                world.log(f"{other.name} condemns {actor.name}'s war on its ally {target.name}.")
+            elif actor.id in other.alliances:
+                _shift_relations(other, target, ALLY_BACKING_RELATION_HIT)
+                world.log(f"{other.name} backs its ally {actor.name} against {target.name}.")
+
+        elif event == "embargo":
+            if target.id in other.alliances:
+                _shift_relations(other, actor, EMBARGO_SOLIDARITY_RELATION_HIT)
+
+        elif event == "alliance":
+            if other.relation(actor.id) < RIVAL_BLOC_THRESHOLD or other.relation(target.id) < RIVAL_BLOC_THRESHOLD:
+                _shift_relations(other, actor, RIVAL_BLOC_WARINESS_HIT)
+                _shift_relations(other, target, RIVAL_BLOC_WARINESS_HIT)
 
 
 def _resolve_pass(world: World, order: Order) -> None:
@@ -135,6 +173,7 @@ def _resolve_propose_alliance(world: World, order: Order) -> None:
         actor.alliances.add(target.id)
         target.alliances.add(actor.id)
         world.log(f"{actor.name} and {target.name} form an alliance.")
+        _react_third_parties(world, actor, target, "alliance")
 
 
 def _resolve_break_alliance(world: World, order: Order) -> None:
@@ -164,6 +203,7 @@ def _resolve_impose_embargo(world: World, order: Order) -> None:
     target.trade_pacts.discard(actor.id)
     _shift_relations(actor, target, EMBARGO_RELATION_HIT)
     world.log(f"{actor.name} imposes an embargo on {target.name}.")
+    _react_third_parties(world, actor, target, "embargo")
 
 
 def _resolve_declare_war(world: World, order: Order) -> None:
@@ -177,6 +217,7 @@ def _resolve_declare_war(world: World, order: Order) -> None:
     target.at_war_with.add(actor.id)
     _shift_relations(actor, target, WAR_RELATION_HIT)
     world.log(f"{actor.name} declares war on {target.name}!")
+    _react_third_parties(world, actor, target, "war")
 
 
 def _resolve_sue_for_peace(world: World, order: Order) -> None:

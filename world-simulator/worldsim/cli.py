@@ -50,10 +50,10 @@ def main() -> None:
     print("=== Concert of Nations ===")
     print("A deterministic, offline geopolitical strategy sim (no AI required).")
     print("Available nations: " + ", ".join(list_nation_ids()))
-    player_id = input("Choose your nation [aurelia]: ").strip() or "aurelia"
+    player_id = input("Choose your nation [usa]: ").strip() or "usa"
     while player_id not in VALID_NATION_IDS:
         print(f"Unknown nation '{player_id}'. Choose from: {', '.join(list_nation_ids())}")
-        player_id = input("Choose your nation [aurelia]: ").strip() or "aurelia"
+        player_id = input("Choose your nation [usa]: ").strip() or "usa"
     seed = 42
     world = default_world(player_id=player_id, seed=seed)
     rng = random.Random(seed)

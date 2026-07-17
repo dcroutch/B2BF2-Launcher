@@ -20,6 +20,42 @@ the game runs instantly, offline, and reproducibly (seeded RNG).
   export is provided so a future UI can be layered on without touching sim
   logic.
 
+## Nation roster
+
+28 nations covering every power widely considered "major" or "moderate" in
+the mid-2026 snapshot (RESEARCH.md): 8 major powers (US, China, Russia,
+India, Germany, UK, France, Japan) anchor the multipolar order; 20 moderate
+regional powers (Brazil, Canada, Australia, South Korea, Indonesia, Turkey,
+Saudi Arabia, Iran, Israel, Egypt, Nigeria, South Africa, Mexico, Pakistan,
+Vietnam, Poland, Italy, Spain, Ukraine, Argentina) contest resources and
+alliances around them. Starting relations, a pre-seeded NATO-style mutual
+alliance bloc, an informal BRICS-style warm-relations bloc, real-world-flavored
+rivalries (US-Russia, India-Pakistan, Israel-Iran, ...), and a few sanctions
+regimes (US/UK/Germany embargo Russia, US embargoes Iran) give the world a
+recognizable starting shape instead of a flat, arbitrary one. See
+`worldsim/scenarios.py`.
+
+## World reactions to player actions
+
+The single biggest thing carried over from Pax Historia's feel -- "the world
+reacts to what you do" -- without an LLM: every `declare_war`, `impose_embargo`,
+and successful `propose_alliance` triggers a **third-party reaction pass**
+(`orders._react_third_parties`) over every other living nation:
+
+- Declare war on a nation -> its allies' relations toward you drop sharply
+  (they condemn you) and your own allies' relations toward your target drop
+  too (they back you) -- both logged as narrative event lines.
+- Impose an embargo -> the target's allies cool toward you.
+- Form a new alliance -> nations hostile to either new member grow warier of
+  both (a new bloc reads as a threat to existing rivals).
+
+These are fixed, deterministic rules (no randomness, no LLM), but because
+they update `relations` immediately, they feed directly into every other
+nation's next-turn AI scoring (`ai.score_order`) -- so a war you start can
+visibly ripple into new alliances, embargoes, and eventually wars between
+nations that were never involved in the original conflict. That's the
+"emergent, reactive world" property, produced entirely by arithmetic.
+
 ## Core model
 
 **Nation** attributes: `stability` (0-100), `military` (0-100),

@@ -14,6 +14,20 @@ def make_world(**overrides):
     return World(nations={"a": a, "b": b})
 
 
+def make_world_with_bystander(**overrides):
+    """Three-nation world (a, b, c) for third-party reaction tests."""
+    a = Nation(id="a", name="A")
+    b = Nation(id="b", name="B")
+    c = Nation(id="c", name="C")
+    for attr, value in overrides.get("a", {}).items():
+        setattr(a, attr, value)
+    for attr, value in overrides.get("b", {}).items():
+        setattr(b, attr, value)
+    for attr, value in overrides.get("c", {}).items():
+        setattr(c, attr, value)
+    return World(nations={"a": a, "b": b, "c": c})
+
+
 class TestOrderValidation(unittest.TestCase):
     def test_self_targeted_order_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -113,6 +127,45 @@ class TestResolveOrders(unittest.TestCase):
         ])
         self.assertNotIn("b", world.get("a").alliances)
         self.assertIn("b", world.get("a").at_war_with)
+
+
+class TestThirdPartyReactions(unittest.TestCase):
+    def test_ally_of_target_condemns_actor_when_war_declared(self):
+        world = make_world_with_bystander()
+        world.get("c").alliances.add("b")
+        world.get("b").alliances.add("c")
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertLess(world.get("c").relation("a"), 0)
+        self.assertLess(world.get("a").relation("c"), 0)
+
+    def test_ally_of_actor_turns_on_target_when_war_declared(self):
+        world = make_world_with_bystander()
+        world.get("c").alliances.add("a")
+        world.get("a").alliances.add("c")
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertLess(world.get("c").relation("b"), 0)
+
+    def test_unrelated_bystander_unaffected_by_war(self):
+        world = make_world_with_bystander()
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertEqual(world.get("c").relation("a"), 0)
+        self.assertEqual(world.get("c").relation("b"), 0)
+
+    def test_ally_of_embargo_target_cools_on_embargoer(self):
+        world = make_world_with_bystander()
+        world.get("c").alliances.add("b")
+        world.get("b").alliances.add("c")
+        resolve_orders(world, [Order("a", "impose_embargo", "b")])
+        self.assertLess(world.get("c").relation("a"), 0)
+
+    def test_rival_of_new_alliance_member_grows_wary(self):
+        world = make_world_with_bystander()
+        world.get("a").relations["b"] = 50
+        world.get("b").relations["a"] = 50
+        world.get("c").relations["a"] = -50
+        world.get("a").relations["c"] = -50
+        resolve_orders(world, [Order("a", "propose_alliance", "b")])
+        self.assertLess(world.get("c").relation("b"), 0)
 
 
 if __name__ == "__main__":
