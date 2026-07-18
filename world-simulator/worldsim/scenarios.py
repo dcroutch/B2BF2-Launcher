@@ -48,6 +48,31 @@ SECTOR_PROFILES = {
     "argentina": {"agriculture": 70},
 }
 
+# Real-world-flavored starting form of government per nation; unlisted
+# nations default to "democracy" (presidential-style, fixed-term elections,
+# no early no-confidence removal). Parliamentary systems can additionally
+# be brought down early by a vote of no confidence under extreme, sustained
+# public/stability distress; authoritarian systems hold no real elections
+# at all -- an unpopular one can only fall through the ordinary stability
+# collapse path.
+GOVERNMENT_PROFILES = {
+    "uk": "parliamentary",
+    "germany": "parliamentary",
+    "japan": "parliamentary",
+    "india": "parliamentary",
+    "canada": "parliamentary",
+    "australia": "parliamentary",
+    "israel": "parliamentary",
+    "italy": "parliamentary",
+    "spain": "parliamentary",
+    "china": "authoritarian",
+    "russia": "authoritarian",
+    "saudi_arabia": "authoritarian",
+    "iran": "authoritarian",
+    "egypt": "authoritarian",
+    "vietnam": "authoritarian",
+}
+
 # id, name, stability, military, economy (0-100 proxies, not literal GDP/army
 # figures -- relative ordering is what matters for gameplay balance).
 MAJOR_POWERS = [
@@ -145,6 +170,7 @@ def default_world(player_id: str = "usa", seed: int = 42) -> World:
             military=float(military),
             economy=float(economy),
             is_player=(nid == player_id),
+            government_type=GOVERNMENT_PROFILES.get(nid, "democracy"),
         )
         for resource, value in RESOURCE_PROFILES.get(nid, {}).items():
             nation.resources[resource] = float(value)

@@ -4,6 +4,8 @@ is parsed by worldsim.parser's fixed keyword rules -- not a language model."""
 from __future__ import annotations
 
 import random
+import secrets
+from typing import Optional
 
 from .engine import game_status, run_turn
 from .models import World
@@ -13,16 +15,21 @@ from .scenarios import default_world, list_nation_ids
 
 VALID_NATION_IDS = set(list_nation_ids())
 
-MAX_TURNS = 100
+# The game has no turn cap: it runs until the player loses, wins by
+# eliminating every other nation, or chooses to end it here.
+QUIT_COMMANDS = {"quit", "exit", "end game", "end the game", "retire", "resign", "stop playing", "stop"}
 
 
 def print_status(world: World, player_id: str) -> None:
     p = world.get(player_id)
-    print(f"\n=== Turn {world.turn} — {p.name} ===")
+    print(f"\n=== Turn {world.turn} — {p.name} ({p.government_type}) ===")
     print(
         f"Stability {p.stability:.0f} | Military {p.military:.0f} | "
         f"Economy {p.economy:.0f} | Public opinion {p.public_opinion:.0f}"
     )
+    if p.government_type != "authoritarian":
+        turns_to_election = p.election_due_turn - world.turn
+        print(f"Next election in {max(turns_to_election, 0)} turn(s) (win threshold: 50 approval)")
     print(f"Sectors: {{{', '.join(f'{k}: {v:.0f}' for k, v in p.sectors.items())}}}")
     print(f"Resources: {{{', '.join(f'{k}: {v:.0f}' for k, v in p.resources.items())}}}")
     if p.alliances:
@@ -55,14 +62,20 @@ def choose_player_order(world: World, player_id: str) -> Order:
         print("Invalid choice, try again.")
 
 
-def get_player_order(world: World, player_id: str) -> Order:
+def get_player_order(world: World, player_id: str) -> Optional[Order]:
     """Free text is the primary interface: type anything, including erratic
     or unrealistic statements ("demand a refund of the Louisiana Purchase")
     -- it always resolves to something. Type 'menu' for a numbered list of
-    known, well-defined actions instead."""
-    text = input("\nWhat does your nation do? (or 'menu' for a list): ").strip()
+    known, well-defined actions instead, or 'quit' to end the session.
+
+    Returns None to signal the player chose to end the game -- this is a
+    UI-level choice handled entirely here, not a world-state outcome, so
+    it never flows through game_status()."""
+    text = input("\nWhat does your nation do? (or 'menu' for a list, 'quit' to end): ").strip()
     if not text:
         return Order(player_id, "pass")
+    if text.lower() in QUIT_COMMANDS:
+        return None
     if text.lower() == "menu":
         return choose_player_order(world, player_id)
     return parse_command(world, player_id, text)
@@ -77,7 +90,12 @@ def main() -> None:
     while player_id not in VALID_NATION_IDS:
         print(f"Unknown nation '{player_id}'. Choose from: {', '.join(list_nation_ids())}")
         player_id = input("Choose your nation [usa]: ").strip() or "usa"
-    seed = 42
+    # A fresh random seed per session -- a hardcoded seed here would make
+    # every replay of "the same" opening moves produce bit-for-bit
+    # identical AI behavior and minor events, effectively handing players
+    # one memorizable optimal script instead of a world that responds to
+    # their choices plus genuine randomness.
+    seed = secrets.randbelow(1_000_000)
     world = default_world(player_id=player_id, seed=seed)
     rng = random.Random(seed)
 
@@ -85,10 +103,14 @@ def main() -> None:
     while status is None:
         print_status(world, player_id)
         order = get_player_order(world, player_id)
+        if order is None:
+            print(f"\n=== GAME ENDED (turn {world.turn}, by your choice) ===")
+            print_status(world, player_id)
+            return
         run_turn(world, [order], rng)
         for line in world.event_log[-5:]:
             print(line)
-        status = game_status(world, player_id, max_turns=MAX_TURNS)
+        status = game_status(world, player_id)
 
     print(f"\n=== GAME OVER: {status.upper()} ===")
 

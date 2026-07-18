@@ -24,6 +24,17 @@ SECTOR_COMMODITY = {
     "services": None,
 }
 
+# Forms of government. "democracy" holds fixed-term elections; "parliamentary"
+# also holds fixed-term elections but can additionally be brought down early
+# by a vote of no confidence; "authoritarian" holds neither -- an unpopular
+# authoritarian regime can only fall through the existing stability-collapse
+# path, not the ballot box.
+GOVERNMENT_TYPES = ("democracy", "parliamentary", "authoritarian")
+ELECTED_GOVERNMENT_TYPES = ("democracy", "parliamentary")
+
+# Turns between scheduled elections for elected governments.
+ELECTION_TERM_LENGTH = 20
+
 STAT_MIN, STAT_MAX = 0, 100
 
 
@@ -65,10 +76,19 @@ class Nation:
     truce_until: dict = field(default_factory=dict)
     is_player: bool = False
     alive: bool = True
+    # Government/elections. "in_power" going False is a distinct end state
+    # from "alive" going False: a nation can lose an election or be brought
+    # down by a no-confidence vote while remaining perfectly stable and
+    # economically intact -- it's a change of leadership, not a collapse.
+    government_type: str = "democracy"
+    election_due_turn: int = None
+    in_power: bool = True
 
     def __post_init__(self):
         if self.economic_potential is None:
             self.economic_potential = self.economy
+        if self.election_due_turn is None:
+            self.election_due_turn = ELECTION_TERM_LENGTH
 
     def relation(self, other_id: str) -> float:
         return self.relations.get(other_id, 0.0)
@@ -110,6 +130,23 @@ class World:
 
     def get(self, nation_id: str) -> Nation:
         return self.nations[nation_id]
+
+    def spawn_nation(self, nation: Nation) -> None:
+        """Add a newly created nation (e.g. a breakaway rebel faction) to
+        the world. It starts taking its own AI turns from the next
+        run_turn call onward."""
+        self.nations[nation.id] = nation
+
+    def purge_nation_references(self, nation_id: str) -> None:
+        """Remove a nation from every other nation's relationship sets --
+        used once a nation is annexed, accedes into another, or collapses,
+        so it doesn't linger as a phantom ally/rival/war target."""
+        for other in self.nations.values():
+            other.alliances.discard(nation_id)
+            other.trade_pacts.discard(nation_id)
+            other.at_war_with.discard(nation_id)
+            other.embargoes_against.discard(nation_id)
+            other.truce_until.pop(nation_id, None)
 
     def log(self, message: str) -> None:
         self.event_log.append(f"[T{self.turn}] {message}")

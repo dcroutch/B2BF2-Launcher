@@ -13,7 +13,18 @@ Order for a different nation, no matter what the input text says --
 "make China declare war on Russia" cannot actually command China. If the
 text's apparent subject is a nation other than the player, the whole
 statement is downgraded to a wildcard rhetorical gesture *by the player*
-about that nation, never an order carried out *by* that nation.
+about that nation, never an order carried out *by* that nation. This
+applies just as much to declarative "fact" statements about another
+nation ("With a vote of 85%, Canada instituted a communist government")
+as it does to commands.
+
+The player's *own* nation is a different story: "With a vote of 85% of
+the population, Canada enacts a communist government" issued while
+playing as Canada is a legitimate self-directed action and does change
+Canada's government -- the claimed vote share is just flavor text, never
+parsed or used to set public_opinion/stability directly; the same fixed
+coup/liberalization consequences apply regardless of what percentage the
+player claims.
 """
 from __future__ import annotations
 
@@ -34,6 +45,8 @@ def _find(lowered: str, phrase: str) -> int:
 # specific/unambiguous verbs first, so "trade war" doesn't accidentally
 # match plain "war" before "trade" is considered, etc.
 VERB_RULES = (
+    ("annex", ("annex", "absorb", "annexation")),
+    ("propose_accession", ("vote to join", "accede to", "join the union", "unite with", "merge into", "petition to join")),
     ("sue_for_peace", ("sue for peace", "cease fire", "ceasefire", "end the war", "make peace", "stop the war", "surrender")),
     ("declare_war", ("declare war", "invade", "attack", "wage war", "go to war", "bomb", "conquer")),
     ("impose_embargo", ("embargo", "sanction", "blockade", "boycott")),
@@ -42,10 +55,43 @@ VERB_RULES = (
     ("trade_pact", ("trade deal", "trade pact", "trade agreement", "free trade")),
     ("improve_relations", ("improve relations", "diplomacy", "reach out", "extend friendship", "make friends", "apologize")),
     ("build_military", ("build military", "build up the military", "rearm", "mobilize", "increase defense spending", "build army")),
+    (
+        "modify_constitution",
+        (
+            "new constitution", "rewrite the constitution", "constitution",
+            "abolish democracy", "impose authoritarian rule", "declare martial law",
+            "coup", "one-party rule", "seize absolute power", "become a dictatorship",
+            "restore democracy", "restore parliament", "restore parliamentary",
+            "become a democracy", "transition to democracy", "hold free elections",
+            # Generic regime-change verbs -- only actually change the
+            # government if _find_government below also recognizes a
+            # specific government-type word somewhere in the text;
+            # otherwise this falls back to a wildcard, so adding these
+            # broad verbs can't misfire into an unintended government
+            # change (see parse_command's matched_type == "modify_constitution"
+            # branch).
+            "enacts a", "establishes a", "installs a", "institutes a",
+            "declares itself a", "becomes a",
+        ),
+    ),
     ("invest_sector", ("invest in", "boost", "develop", "fund", "grow the", "subsidize")),
     ("invest_economy", ("invest", "stimulate", "economic stimulus", "grow the economy")),
     ("pass", ("do nothing", "wait", "hold position", "stand down")),
 )
+
+# Maps keywords about a *form of government* to a GOVERNMENT_TYPES value,
+# used only to fill in modify_constitution's detail -- never to look up or
+# change any nation other than the actor (that order has no target_id).
+GOVERNMENT_ALIASES = {
+    "communist": "authoritarian", "communism": "authoritarian",
+    "fascist": "authoritarian", "fascism": "authoritarian",
+    "dictatorship": "authoritarian", "dictator": "authoritarian",
+    "authoritarian": "authoritarian", "one-party": "authoritarian",
+    "one party": "authoritarian", "autocracy": "authoritarian",
+    "martial law": "authoritarian", "junta": "authoritarian",
+    "democracy": "democracy", "democratic": "democracy", "republic": "democracy",
+    "parliament": "parliamentary", "parliamentary": "parliamentary",
+}
 
 SECTOR_ALIASES = {
     "agriculture": "agriculture", "farm": "agriculture", "farming": "agriculture",
@@ -82,6 +128,13 @@ def _find_sector(lowered: str) -> str:
     return None
 
 
+def _find_government(lowered: str) -> str:
+    for alias, government_type in GOVERNMENT_ALIASES.items():
+        if _find(lowered, alias) != -1:
+            return government_type
+    return None
+
+
 def parse_command(world: World, player_id: str, text: str) -> Order:
     """Turn free-text player input into a resolvable Order for player_id.
 
@@ -95,6 +148,16 @@ def parse_command(world: World, player_id: str, text: str) -> Order:
     for alias, nid in nation_lookup.items():
         idx = _find(lowered, alias)
         if idx == -1:
+            continue
+        # A possessive mention ("Germany's collapse") is a modifier, not
+        # the sentence's subject or its intended target -- counting it as
+        # either silently mangles a legitimate order (e.g. "Following
+        # Germany's collapse, we annex Poland" both tripping the
+        # impersonation guard on "Germany" *and* picking Germany, not
+        # Poland, as the annex target).
+        after = lowered[idx + len(alias):idx + len(alias) + 2]
+        possessive = after in ("'s", "’s")
+        if possessive:
             continue
         if earliest_pos is None or idx < earliest_pos:
             earliest_id, earliest_pos = nid, idx
@@ -125,6 +188,15 @@ def parse_command(world: World, player_id: str, text: str) -> Order:
         sector = _find_sector(lowered)
         if sector is None:
             matched_type = "invest_economy"
+
+    if matched_type == "modify_constitution":
+        government_type = _find_government(lowered)
+        if government_type is None:
+            # Recognized "constitution"/"coup"-flavored language but
+            # couldn't tell which form of government was intended --
+            # resolve as a wildcard rather than guessing.
+            return Order(player_id, "wildcard", target_id=target_id, detail=text)
+        return Order(player_id, "modify_constitution", detail=government_type)
 
     if matched_type is None:
         # No recognized verb at all: highly unusual/chaotic/unrealistic

@@ -106,9 +106,53 @@ and a global `event_log`.
    stability drifts toward a target based on war exhaustion / prosperity,
    wars inflict military and stability losses on both sides each turn a war
    persists, embargoes drain the target's economy.
-5. Random minor events (seeded) can nudge stability/resources (drought,
-   discovery, unrest) — small, bounded, always logged.
+5. Random minor events (seeded, magnitude-randomized within a range —
+   see "Minor events" below) can nudge stability/resources (drought,
+   discovery, unrest) — small, bounded, always logged. Unrest-flavored
+   events (civil unrest, corruption scandal) are only ever eligible for a
+   nation whose own stability or public opinion has already degraded
+   below a threshold; a stable, well-governed nation cannot draw one.
 6. Win/lose/continue check; log turn summary; increment turn counter.
+
+## Minor events: not fixed, gated by domestic state, not predictable
+
+`engine._maybe_trigger_minor_event` replaced an earlier flat design (a
+fixed 8% chance, then `random.choice` over one flat tuple of 8 events
+with hardcoded deltas) that had two problems: (1) civil unrest and
+corruption scandal could hit *any* nation regardless of how well it was
+actually governed, including one at 90 stability/90 opinion, which reads
+as arbitrary rather than a consequence of anything; (2) every occurrence
+of "the same" event applied an identical, hardcoded delta, so a min-maxing
+player replaying the same opening moves with the same seed would see
+bit-for-bit identical outcomes forever.
+
+Now:
+- **Unrest gating**: `UNREST_EVENTS` (civil_unrest, corruption_scandal)
+  only enter the roll's pool when `nation.stability < UNREST_STABILITY_THRESHOLD`
+  (40) or `nation.public_opinion < UNREST_OPINION_THRESHOLD` (40) --
+  i.e. the nation is already, demonstrably struggling as a result of
+  whatever choices (player or AI) got it there. `POSITIVE_EVENTS` and the
+  weather/supply-shock `NEUTRAL_EVENTS` (drought) remain available to
+  everyone, since a drought isn't a verdict on governance quality the way
+  unrest is.
+- **State-responsive chance, not a flat coin flip**: the overall chance of
+  *any* event this turn is `BASE_EVENT_CHANCE` (6%), bumped by
+  `STRUGGLING_EVENT_CHANCE_BONUS` (+5%) when the nation is already
+  struggling -- more is happening to a nation in domestic trouble, not
+  just worse things when something does happen.
+- **Randomized magnitude**: every event's stability/opinion/resource
+  deltas are now `(lo, hi)` ranges sampled via `rng.uniform(...)`, not
+  fixed constants -- no two occurrences of "the same" event play out
+  identically, even across an otherwise-identical replay.
+
+This resolution mechanism is still fully deterministic given a seed +
+identical actions (a hard requirement for testability), but the *seed
+itself* is no longer fixed in either front end: `cli.py` used to
+hardcode `seed = 42`, meaning literally every terminal session with the
+same opening moves saw the exact same AI behavior and events forever --
+a memorizable, forced-optimal script rather than a world that responds to
+choices plus genuine randomness. It now draws a fresh seed
+(`secrets.randbelow`) per session, matching what `web.py` already did.
 
 ## Orders (the fixed action menu — replaces free-text)
 
@@ -133,11 +177,25 @@ seed.
 
 ## Victory / failure conditions (single-player framing)
 
-- Player nation's stability hits 0 -> collapse (loss).
-- Player conquers (reduces to 0 stability while at war and holds military
-  superiority) enough rival nations, or survives N turns as the strongest
-  economy/military -> win states, reported at run end. Kept intentionally
-  simple; scenario presets can define custom win conditions later.
+There is no turn cap. `game_status` (engine.py) no longer accepts a
+`max_turns` parameter and never forces a win/loss purely because the turn
+counter reached some number -- a prior version did ("strongest at turn
+100 wins"), which meant the game could hand out an artificial verdict
+completely disconnected from what actually happened in play. The game now
+runs until one of exactly three things happens:
+
+- **Loss**: the player's nation collapses (stability 0, `alive = False`)
+  or its government falls (election defeat, a parliamentary no-confidence
+  vote, or being annexed/acceded away -- all surfaced through `in_power`/
+  `alive`, see the government and conquest sections above).
+- **Win**: the player is the sole surviving nation (`len(alive_nations())
+  == 1`) -- i.e. actual conquest of everyone else, now reachable via the
+  annexation/collapse-during-war/civil-war mechanics above.
+- **Voluntary end**: the player types `quit`/`exit`/`retire`/etc. at the
+  CLI prompt. This is handled entirely in `cli.py` (`get_player_order`
+  returns `None` as a sentinel) -- it's a UI-level choice, not a
+  world-state outcome, so it's reported separately ("GAME ENDED") rather
+  than as a win or loss verdict.
 
 ## Project layout
 
@@ -154,13 +212,49 @@ world-simulator/
     engine.py       # turn loop, passive effects, events
     scenarios.py    # starting-world presets (data, no logic)
     cli.py          # interactive terminal game loop
+    parser.py       # deterministic free-text -> Order parser
+    web.py          # stdlib WSGI JSON API + embedded single-page UI
   tests/
     test_models.py
     test_orders.py
     test_ai.py
     test_engine.py
-  run.py            # entry point: python run.py
+    test_web.py
+  run.py            # entry point: python run.py (terminal)
+  run_web.py        # entry point: python run_web.py (browser)
 ```
+
+## Web app (worldsim/web.py)
+
+Same engine, a different front end -- no game logic lives in this file,
+only request handling and JSON/HTML serialization. Deliberately built on
+just the standard library (`wsgiref.simple_server`, `http.cookies`,
+`json`) rather than a framework like Flask, since the rest of the project
+has zero external dependencies and this shouldn't be the exception.
+
+- **Session model**: each browser gets an httponly cookie
+  (`con_sid`) minted by `POST /api/new`; the actual `World`/`Random`/
+  `player_id` live server-side in an in-memory `SESSIONS` dict keyed by
+  that cookie value. Nothing about game state is trusted from the client
+  beyond the order text/menu index -- the same trust boundary the CLI has,
+  just over HTTP instead of stdin.
+- **Endpoints**: `GET /` (the page), `GET /api/nations`, `POST /api/new`,
+  `GET /api/state`, `POST /api/menu`, `POST /api/order` (either `{"text":
+  ...}` through the same `parser.parse_command` the CLI uses, or
+  `{"index": N}` against the same `legal_orders` list the menu came from),
+  `POST /api/quit`. A finished game (`game_status` returns non-`None`) or
+  an explicit quit both clear the session server-side.
+- **Log delivery**: `event_log` is returned incrementally -- each session
+  tracks a `log_cursor` (how much of `world.event_log` the client has
+  already seen) so repeated polling/turns don't resend the whole growing
+  log every time.
+- **Routing fix found while testing**: the first version required an
+  active session for *any* unrecognized path before checking whether the
+  path was even a real route, so `GET /anything-typoed` returned "no
+  active game" (400) instead of 404. Fixed by checking path/method against
+  an explicit set of session-requiring routes first; everything else
+  (including typos) now correctly 404s regardless of session state. Caught
+  by `tests/test_web.py::TestIndexPage::test_unknown_path_is_404`.
 
 ## Free text, the actor-lock guarantee, and chaotic input
 
@@ -219,6 +313,166 @@ extracts the target. Two properties matter more than parsing accuracy:
   Arabia/Russia lead oil, Japan/South Korea lead technology, Brazil/
   Argentina lead food, ...) so nations start economically differentiated,
   not just militarily/diplomatically.
+
+## Government, elections, and checks and balances
+
+- **Three government types** (`Nation.government_type`): `democracy`
+  (fixed-term, presidential-style — can only be removed at a scheduled
+  election), `parliamentary` (fixed-term elections *plus* an early-removal
+  check-and-balance), `authoritarian` (no real elections at all).
+- **Scheduled elections** (`engine._resolve_elections` / `_hold_election`):
+  every elected government faces an election on `election_due_turn` (every
+  `ELECTION_TERM_LENGTH` = 20 turns). The outcome is fully legible to the
+  player: win if `public_opinion >= 50` at that moment, lose otherwise --
+  no hidden randomness. For the player, losing sets `in_power = False`,
+  which `game_status` treats as a loss condition distinct from the
+  stability-collapse path (a nation can lose an election while perfectly
+  stable and prosperous). For AI nations, a loss just installs a new
+  administration with a reset approval rating and keeps the nation in play
+  -- governments turn over in the background all game, not just the
+  player's.
+- **Parliamentary no-confidence** (`_resolve_elections`'s `elif` branch):
+  only `parliamentary` systems can fall *between* elections, and only under
+  genuinely extreme, simultaneous distress (`public_opinion < 15` and
+  `stability < 25`) -- this is the "checks and balances remove the ruling
+  power under extreme displeasure" mechanic, deliberately scoped tighter
+  than a scheduled election loss so it can't be triggered by one bad turn.
+  A `democracy` (presidential system) has no equivalent early-removal path
+  by design -- modeling impeachment realistically was out of scope, so a
+  presidential government simply serves out its term.
+- **`modify_constitution`** (self-only order, no `target_id` at all --
+  see below) lets a government change its own type: abolishing an elected
+  government for `authoritarian` rule is modeled as a coup (large
+  opinion/stability hit, every other elected government's relations toward
+  the actor cool -- reusing `_shift_relations`, not a new reaction
+  channel); adopting an elected constitution schedules a fresh election
+  term; a reform between `democracy` and `parliamentary` is minor.
+
+### The player cannot dictate outcomes for another nation by asserting them
+
+This generalizes the actor-lock guarantee from free text
+("declare war") to free text asserting *facts*
+("with a vote of 85%, Canada instituted a communist constitution"). Two
+things make this safe by construction, not by pattern-matching harder:
+
+1. `modify_constitution` has no `target_id` -- there is no code path,
+   parser bug, or malformed input that can make it change any nation's
+   government except the actor's own, because the concept of "a different
+   target" doesn't exist for this order type.
+2. The parser's existing impersonation guard (a different nation named
+   before any recognized verb -> downgrade to `wildcard`) already covers
+   declarative "fact" statements about other nations, since it fires on
+   *any* verb match, including `modify_constitution`'s. "Canada instituted
+   a communist constitution" names Canada before the constitution-flavored
+   keywords, so it becomes a wildcard rhetorical statement toward Canada
+   (logged, sentiment-scored, relation-shifting) -- never an actual change
+   to Canada's `government_type`. See
+   `tests/test_government.py::TestParserCannotDictateOtherNationsGovernment`.
+
+Crucially, the guard keys off *which nation is named*, not *whether a
+nation is named at all*: `earliest_id != player_id` is the actual
+condition. So "With a vote of 85% of the population, Canada enacts a
+communist government" while playing as Canada does **not** trigger the
+guard (`earliest_id == player_id`) and resolves to a real
+`modify_constitution` order -- the claimed 85% is just flavor text in
+`Order.detail`'s raw string, never parsed into a number or used anywhere;
+the fixed coup penalty and reactions apply exactly as if the player had
+said "we impose authoritarian rule." The same sentence with a *different*
+nation playing still gets blocked, since then `earliest_id` (Canada) does
+differ from `player_id`. See
+`TestSelfDirectedRegimeChangeWithPopulationFraming` in the same file.
+
+## Sovereignty changes: conquest, annexation, civil war, accession
+
+A prior full-game playthrough reached turn-cap dominance but never true
+conquest, because there was no mechanic for one nation to actually absorb
+another -- wars only ever caused temporary attrition that recovered once
+a ceasefire landed. This closes that gap with four related mechanics that
+all funnel through one shared merge function.
+
+### `absorb_nation` (orders.py)
+
+A single function used by every path that removes a nation from the map
+by folding it into another: `_resolve_annex`, `_resolve_propose_accession`,
+and `engine._check_collapses`'s war-collapse branch. It takes a
+`peaceful: bool` flag that controls transfer efficiency (conquest wastes
+half of what it takes; a voluntary union keeps 80%) and whether the rest
+of the world reacts with alarm (forced annexation alarms every other
+democracy via `_shift_relations`; peaceful accession doesn't touch anyone
+else's relations). It always: transfers a fraction of economy/economic_potential/
+military/resources, sets `absorbed.alive = False`, and calls
+`world.purge_nation_references(absorbed.id)` so no other nation is left
+holding a stale alliance/trade-pact/war/embargo/truce reference to a
+nation that no longer exists.
+
+### Forced conquest: `annex`
+
+Legal only against a nation the actor is already at war with *and* has
+crushed decisively (`_is_annex_eligible`: target military under 15, or
+actor's more than 3x the target's). This is deliberately the same
+"crushed" threshold that triggers a losing side's own strong urge to sue
+for peace -- which is exactly why the `sue_for_peace` bug fix below
+mattered: without it, the losing side could always escape via peace
+before the winner ever got a turn to annex.
+
+### The `sue_for_peace` bug this all depended on fixing
+
+`_resolve_sue_for_peace` checked `actor_winning = actor.military >
+target.military * 1.3` where `actor` is *the nation asking for peace*.
+Since the realistic asker is the losing side, `actor_winning` was nearly
+always false, so peace nearly always succeeded -- meaning a decisively
+dominant side could never press its advantage; the war just ended the
+moment the loser asked, no matter how lopsided the fight was. Fixed to
+check the *target's* (the side being asked, whose consent should actually
+matter) dominance instead: `target_dominant = target.military >
+actor.military * 1.3`. Now a losing side's peace offer can be rejected
+("presses its advantage and rejects..."), which is what makes annexation
+(and collapse-during-war annexation) reachable at all rather than
+theoretical.
+
+### Collapse-during-war becomes annexation, not erasure
+
+`engine._check_collapses` used to just set `alive = False` on any nation
+whose stability hit 0. Now: if that nation is still at war when it
+collapses, the strongest nation among its `at_war_with` set (by military)
+annexes it via `absorb_nation(..., peaceful=False)` instead. A nation that
+collapses with no war in progress still just fails, unchanged. This is
+what makes sustained warfare a *reliable* path to conquest -- you don't
+have to time an explicit `annex` order perfectly; grinding an enemy down
+across a long war eventually finishes the job on its own. Verified in a
+400-turn simulation: Russia, fighting the whole NATO bloc after attacking
+Poland, rejected multiple ceasefire offers while still dominant, then its
+own stability collapsed from fighting on too many fronts at once, and the
+strongest nation among its enemies (the US) automatically annexed it --
+with a rebel faction (see below) having already broken off in the same
+turn and surviving independently afterward.
+
+### Civil war / rebel factions (`engine._maybe_trigger_civil_war`)
+
+A nation with both stability and public opinion below extreme thresholds
+(15 / 20) rolls a 12%-per-turn chance to fracture: a brand-new `Nation`
+(`world.spawn_nation`) is created holding 30% of the parent's military,
+economy, and resources; the parent keeps the other 70% plus an additional
+stability/opinion shock for the trauma of the split. The rebel faction is
+born at war with its parent and is otherwise a completely ordinary
+nation from that point on -- no special-cased AI, no scripted rebel
+behavior. It picks orders via the same `ai.score_order` everyone else
+uses, meaning it can sue for peace, build alliances, invest in its
+economy, or even vote to (re)join a nation later via `propose_accession`.
+This is the "domestic fracturing into rebel zones" requirement: emergent,
+not a one-off event.
+
+### Peaceful accession (`propose_accession`)
+
+The non-violent counterpart: legal only when *both* sides' relations
+toward each other are already very high (>=70, checked both directions so
+one side can't force it), a small nation can vote to dissolve into a
+larger one. No target penalty, no international alarm, better transfer
+efficiency than conquest -- modeling something like a plebiscite/merger
+rather than a war of absorption. AI nations essentially never propose
+this for themselves (scored -50 in `ai.py`, same pattern as
+`modify_constitution`), keeping it a player-driven, deliberate choice
+while remaining fully available to the player.
 
 ## Testing strategy
 

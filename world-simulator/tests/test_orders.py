@@ -94,14 +94,31 @@ class TestResolveOrders(unittest.TestCase):
         resolve_orders(world, [Order("a", "declare_war", "b")])
         self.assertNotIn("b", world.get("a").alliances)
 
-    def test_sue_for_peace_rejected_when_actor_dominant(self):
-        world = make_world(a={"military": 90}, b={"military": 10})
+    def test_sue_for_peace_rejected_when_target_is_dominant(self):
+        # The realistic case: the losing side (a, weak) asks the dominant
+        # side (b, strong) for peace. b has the actual say and, being
+        # dominant, presses its advantage instead of accepting -- this is
+        # what makes conquest/annexation reachable at all; previously this
+        # checked the *asker's* dominance instead of the *target's*, so a
+        # losing side could always talk its way out of a war no matter how
+        # thoroughly it was being crushed.
+        world = make_world(a={"military": 10}, b={"military": 90})
         world.get("a").at_war_with.add("b")
         world.get("b").at_war_with.add("a")
         resolve_orders(world, [Order("a", "sue_for_peace", "b")])
         self.assertIn("b", world.get("a").at_war_with)
 
-    def test_sue_for_peace_accepted_when_not_dominant(self):
+    def test_sue_for_peace_accepted_when_dominant_side_offers_it(self):
+        # The dominant side (a) offering peace to the weaker side (b) is
+        # always accepted -- b, not being dominant, has no reason to
+        # refuse a ceasefire being offered to it.
+        world = make_world(a={"military": 90}, b={"military": 10})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        self.assertNotIn("b", world.get("a").at_war_with)
+
+    def test_sue_for_peace_accepted_when_neither_side_is_dominant(self):
         world = make_world(a={"military": 40}, b={"military": 40})
         world.get("a").at_war_with.add("b")
         world.get("b").at_war_with.add("a")
@@ -142,6 +159,27 @@ class TestResolveOrders(unittest.TestCase):
         resolve_orders(world, [Order("a", "build_military", None)])
         self.assertLess(world.get("a").economy, 50)
         self.assertGreater(world.get("a").military, 10)
+
+    def test_build_military_at_full_strength_does_not_waste_economy(self):
+        # Regression test: military is capped at 100, but the resolver
+        # used to spend economy unconditionally regardless of how much
+        # military the nation could actually still gain -- clamp_stats
+        # silently discarded the overflow afterward, so a nation already
+        # at (or essentially at) the cap paid real economic cost for zero
+        # military benefit, turn after turn.
+        world = make_world(a={"economy": 60, "economic_potential": 60, "military": 100})
+        resolve_orders(world, [Order("a", "build_military", None)])
+        self.assertEqual(world.get("a").economy, 60)
+        self.assertEqual(world.get("a").military, 100)
+
+    def test_build_military_near_the_cap_only_charges_for_the_remaining_room(self):
+        world = make_world(a={"economy": 60, "economic_potential": 60, "military": 98})
+        resolve_orders(world, [Order("a", "build_military", None)])
+        self.assertEqual(world.get("a").military, 100)
+        # Only ~2 military worth of spend (2/1.2) should have been
+        # charged, not the full min(15, economy*0.2) it would take if
+        # there were no cap.
+        self.assertGreater(world.get("a").economy, 58)
 
     def test_invest_economy_raises_economic_potential(self):
         world = make_world()

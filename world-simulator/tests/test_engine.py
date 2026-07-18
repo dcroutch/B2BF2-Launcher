@@ -84,12 +84,20 @@ class TestGameStatus(unittest.TestCase):
                 n.alive = False
         self.assertEqual(game_status(world, "usa"), "win")
 
-    def test_max_turns_reached_declares_strongest_winner(self):
+    def test_loss_when_player_ousted_from_power(self):
         world = default_world()
-        world.turn = 100
-        world.get("usa").economy = 100
-        world.get("usa").military = 100
-        self.assertEqual(game_status(world, "usa", max_turns=100), "win")
+        world.get("usa").in_power = False
+        self.assertEqual(game_status(world, "usa"), "loss")
+
+    def test_there_is_no_turn_cap_game_continues_regardless_of_how_high_the_turn_counter_is(self):
+        # Regression test: the game used to force a win/loss the moment
+        # world.turn hit a fixed cap, purely based on who was strongest at
+        # that instant. There is no such cap anymore -- the game keeps
+        # running indefinitely until an actual loss/win/voluntary-quit
+        # condition is met, no matter how many turns have passed.
+        world = default_world()
+        world.turn = 100_000
+        self.assertIsNone(game_status(world, "usa"))
 
 
 if __name__ == "__main__":

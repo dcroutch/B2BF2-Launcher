@@ -67,6 +67,19 @@ class TestVerbRecognition(unittest.TestCase):
         self.assertEqual(order.type, "invest_sector")
         self.assertEqual(order.detail, "technology")
 
+    def test_annex_recognized_with_target(self):
+        # Regression test: annex/propose_accession had no VERB_RULES entry
+        # at all, so free text could never reach them -- only the menu
+        # (numbered CLI list / web app menu index) could.
+        world = default_world(player_id="usa")
+        order = parse_command(world, "usa", "Annex Ukraine")
+        self.assertEqual(order, Order("usa", "annex", "ukraine"))
+
+    def test_propose_accession_recognized_with_target(self):
+        world = default_world(player_id="canada")
+        order = parse_command(world, "canada", "We vote to join the United States")
+        self.assertEqual(order, Order("canada", "propose_accession", "usa"))
+
     def test_generic_investment_without_sector_falls_back(self):
         world = default_world(player_id="usa")
         order = parse_command(world, "usa", "Stimulate the economy")
@@ -98,6 +111,27 @@ class TestWildcardFallback(unittest.TestCase):
         order = parse_command(world, "usa", "The president juggles flaming torches")
         self.assertEqual(order.type, "wildcard")
         self.assertIsNone(order.target_id)
+
+
+class TestPossessiveMentionIsNotTreatedAsSubject(unittest.TestCase):
+    """Regression tests: the impersonation guard used to treat *any*
+    earliest nation mention as the sentence's subject, including a purely
+    possessive one ("Germany's surrender"), silently downgrading a
+    legitimate self-directed order into a wildcard."""
+
+    def test_possessive_mention_does_not_block_a_real_order(self):
+        world = default_world(player_id="usa")
+        order = parse_command(world, "usa", "Following Germany's collapse, we annex Poland")
+        self.assertEqual(order.actor_id, "usa")
+        self.assertEqual(order.type, "annex")
+        self.assertEqual(order.target_id, "poland")
+
+    def test_non_possessive_mention_still_triggers_the_guard(self):
+        # Make sure the fix didn't just disable the guard outright.
+        world = default_world(player_id="usa")
+        order = parse_command(world, "usa", "Germany declares war on Poland")
+        self.assertEqual(order.actor_id, "usa")
+        self.assertEqual(order.type, "wildcard")
 
 
 if __name__ == "__main__":

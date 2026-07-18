@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from .models import SECTOR_COMMODITY, SECTOR_TYPES, World
+from .models import ELECTION_TERM_LENGTH, GOVERNMENT_TYPES, SECTOR_COMMODITY, SECTOR_TYPES, STAT_MAX, World
 
 ORDER_TYPES = (
     "pass",
@@ -22,6 +22,17 @@ ORDER_TYPES = (
     "impose_embargo",
     "declare_war",
     "sue_for_peace",
+    # Forced conquest: only legal against a nation the actor is already at
+    # war with and has crushed decisively (see legal_orders).
+    "annex",
+    # A nation voting to peacefully dissolve into another. This is a
+    # self-only-in-spirit order in that it can only ever remove *the
+    # actor itself* from the map, never force another nation to disband.
+    "propose_accession",
+    # Self-only, like invest_sector: no other nation can ever be the target
+    # of this order, so no input text can change *another* nation's form of
+    # government -- only the actor's own.
+    "modify_constitution",
     # A catch-all for erratic, chaotic, or otherwise unmodeled player intent
     # (see worldsim/parser.py) -- still resolves deterministically, just
     # through a sentiment-scored generic gesture instead of a fixed effect.
@@ -36,11 +47,14 @@ PRIORITY = {
     "trade_pact": 0,
     "impose_embargo": 0,
     "sue_for_peace": 0,
+    "propose_accession": 0,
     "wildcard": 0,
     "invest_economy": 1,
     "invest_sector": 1,
     "build_military": 1,
+    "modify_constitution": 1,
     "declare_war": 2,
+    "annex": 2,
     "pass": 3,
 }
 
@@ -50,8 +64,9 @@ class Order:
     actor_id: str
     type: str
     target_id: Optional[str] = None
-    # Free-form extra parameter: sector name for invest_sector, raw player
-    # text for wildcard. Unused by every other order type.
+    # Free-form extra parameter: sector name for invest_sector, new
+    # government type for modify_constitution, raw player text for
+    # wildcard. Unused by every other order type.
     detail: Optional[str] = None
 
     def __post_init__(self):
@@ -63,6 +78,8 @@ class Order:
             raise ValueError(f"Order {self.type} cannot target its own actor")
         if self.type == "invest_sector" and self.detail not in SECTOR_TYPES:
             raise ValueError(f"invest_sector requires detail to be one of {SECTOR_TYPES}")
+        if self.type == "modify_constitution" and self.detail not in GOVERNMENT_TYPES:
+            raise ValueError(f"modify_constitution requires detail to be one of {GOVERNMENT_TYPES}")
 
 
 TARGETED_ORDERS = {
@@ -73,6 +90,8 @@ TARGETED_ORDERS = {
     "impose_embargo",
     "declare_war",
     "sue_for_peace",
+    "annex",
+    "propose_accession",
 }
 
 ALLIANCE_RELATION_THRESHOLD = 40
@@ -94,6 +113,23 @@ ALLIANCE_OPINION_BOOST = 3
 PEACE_HUMILIATION_OPINION_HIT = -6
 PEACE_RELIEF_OPINION_BOOST = 2
 
+# A war can be ended by outright conquest once the actor has crushed the
+# target this decisively -- either the target's military has collapsed to
+# a token force, or the actor's is overwhelming relative to it.
+ANNEX_MILITARY_FLOOR = 15.0
+ANNEX_DOMINANCE_RATIO = 3.0
+ANNEX_MIN_ACTOR_MILITARY = 15.0
+
+# High enough mutual trust that a population would plausibly vote to give
+# up sovereignty and join a neighbor outright, rather than just allying.
+ACCESSION_RELATION_THRESHOLD = 70.0
+
+
+def _is_annex_eligible(actor, target) -> bool:
+    if actor.military < ANNEX_MIN_ACTOR_MILITARY:
+        return False
+    return target.military < ANNEX_MILITARY_FLOOR or actor.military > target.military * ANNEX_DOMINANCE_RATIO
+
 
 def legal_orders(world: World, actor_id: str):
     """Yield every legal Order the given nation could issue this turn."""
@@ -103,6 +139,9 @@ def legal_orders(world: World, actor_id: str):
     yield Order(actor_id, "invest_economy")
     for sector in SECTOR_TYPES:
         yield Order(actor_id, "invest_sector", detail=sector)
+    for government_type in GOVERNMENT_TYPES:
+        if government_type != actor.government_type:
+            yield Order(actor_id, "modify_constitution", detail=government_type)
     for other in world.alive_nations():
         if other.id == actor_id:
             continue
@@ -122,8 +161,12 @@ def legal_orders(world: World, actor_id: str):
                 yield Order(actor_id, "impose_embargo", other.id)
             if world.turn >= actor.truce_until.get(other.id, -1):
                 yield Order(actor_id, "declare_war", other.id)
+            if mutual_relation >= ACCESSION_RELATION_THRESHOLD:
+                yield Order(actor_id, "propose_accession", other.id)
         else:
             yield Order(actor_id, "sue_for_peace", other.id)
+            if _is_annex_eligible(actor, other):
+                yield Order(actor_id, "annex", other.id)
 
 
 ALLY_SOLIDARITY_RELATION_HIT = -20
@@ -199,7 +242,16 @@ def _resolve_pass(world: World, order: Order) -> None:
 
 def _resolve_build_military(world: World, order: Order) -> None:
     actor = world.get(order.actor_id)
-    spend = min(15.0, actor.economy * 0.2)
+    # Once military is already at (or essentially at) its hard cap,
+    # spending here would buy zero real gain -- clamp_stats silently
+    # discards the overflow after this resolver runs, but the economic
+    # cost would still have been paid for nothing. Charge only for the
+    # military the nation can actually still gain.
+    room = max(0.0, STAT_MAX - actor.military)
+    if room <= 0.0:
+        world.log(f"{actor.name}'s military is already at full strength; the buildup has nowhere to go.")
+        return
+    spend = min(15.0, actor.economy * 0.2, room / 1.2)
     actor.economy -= spend
     actor.military += spend * 1.2
 
@@ -225,6 +277,56 @@ def _resolve_invest_sector(world: World, order: Order) -> None:
         actor.resources[commodity] = actor.resources.get(commodity, 0.0) + 5
     sector_label = sector.replace("_sector", "").replace("_", " ")
     world.log(f"{actor.name} invests in its {sector_label} sector.")
+
+
+CONSTITUTION_COUP_OPINION_HIT = -25
+CONSTITUTION_COUP_STABILITY_HIT = -15
+CONSTITUTION_COUP_RELATION_HIT = -12
+CONSTITUTION_LIBERALIZATION_OPINION_BOOST = 15
+CONSTITUTION_TRANSITION_STABILITY_HIT = -5
+CONSTITUTION_REFORM_OPINION_DELTA = 3
+
+
+def _resolve_modify_constitution(world: World, order: Order) -> None:
+    """Change the actor's own government type -- this order has no
+    target_id at all, so no player input can ever change *another*
+    nation's constitution, only their own (see worldsim/parser.py)."""
+    actor = world.get(order.actor_id)
+    old_type = actor.government_type
+    new_type = order.detail
+    if new_type == old_type:
+        world.log(f"{actor.name} reaffirms its existing {old_type} constitution.")
+        return
+
+    was_elected = old_type in ("democracy", "parliamentary")
+    becomes_elected = new_type in ("democracy", "parliamentary")
+
+    if was_elected and not becomes_elected:
+        # A coup: abolishing elected government for authoritarian rule.
+        actor.public_opinion += CONSTITUTION_COUP_OPINION_HIT
+        actor.stability += CONSTITUTION_COUP_STABILITY_HIT
+        world.log(f"{actor.name} abolishes its {old_type} constitution and imposes {new_type} rule.")
+        condemners = 0
+        for other in world.alive_nations():
+            if other.id == actor.id:
+                continue
+            if other.government_type in ("democracy", "parliamentary"):
+                _shift_relations(other, actor, CONSTITUTION_COUP_RELATION_HIT)
+                condemners += 1
+        if condemners:
+            world.log(f"The world's democracies condemn {actor.name}'s power grab.")
+    elif not was_elected and becomes_elected:
+        # Democratization: elections are scheduled for the new term.
+        actor.public_opinion += CONSTITUTION_LIBERALIZATION_OPINION_BOOST
+        actor.stability += CONSTITUTION_TRANSITION_STABILITY_HIT
+        actor.election_due_turn = world.turn + ELECTION_TERM_LENGTH
+        world.log(f"{actor.name} adopts a {new_type} constitution and schedules elections.")
+    else:
+        # A reform between two elected systems (democracy <-> parliamentary).
+        actor.public_opinion += CONSTITUTION_REFORM_OPINION_DELTA
+        world.log(f"{actor.name} reforms its constitution from {old_type} to {new_type}.")
+
+    actor.government_type = new_type
 
 
 def _resolve_improve_relations(world: World, order: Order) -> None:
@@ -297,17 +399,22 @@ def _resolve_declare_war(world: World, order: Order) -> None:
 
 
 def _resolve_sue_for_peace(world: World, order: Order) -> None:
-    actor = world.get(order.actor_id)
-    target = world.get(order.target_id)
+    actor = world.get(order.actor_id)  # the one asking for peace
+    target = world.get(order.target_id)  # the one who must agree to it
     if target.id not in actor.at_war_with:
         return
-    # Peace sticks if the target isn't clearly winning, or if both sides
-    # have fought each other to a standstill (near-zero militaries) -- a
-    # strict "is actor losing" check alone never fires on a tied stalemate,
-    # which otherwise leaves wars stuck at 0 military forever.
-    actor_winning = actor.military > target.military * 1.3
+    # Peace sticks if the *target* (whose consent actually matters) isn't
+    # clearly dominant, or if both sides have fought each other to a
+    # standstill (near-zero militaries). Bug fix: this used to check
+    # whether the *asker* was winning, which is nearly always false for
+    # the losing side that realistically asks for peace -- meaning peace
+    # always succeeded no matter how thoroughly the asker was being
+    # crushed, and a decisively dominant side could never press its
+    # advantage toward annexation. Now the side actually being asked to
+    # stop fighting gets a real say.
+    target_dominant = target.military > actor.military * 1.3
     mutually_exhausted = actor.military < 15 and target.military < 15
-    if not actor_winning or mutually_exhausted:
+    if not target_dominant or mutually_exhausted:
         actor.at_war_with.discard(target.id)
         target.at_war_with.discard(actor.id)
         actor.truce_until[target.id] = world.turn + TRUCE_DURATION
@@ -319,7 +426,85 @@ def _resolve_sue_for_peace(world: World, order: Order) -> None:
         target.public_opinion += PEACE_RELIEF_OPINION_BOOST
         world.log(f"{actor.name} and {target.name} agree to a ceasefire.")
     else:
-        world.log(f"{target.name} rejects {actor.name}'s peace offer.")
+        world.log(f"{target.name} presses its advantage and rejects {actor.name}'s peace offer.")
+
+
+# Sovereignty changes: a nation ceasing to exist as an independent actor,
+# its territory/population/economy folded into another. Two flavors --
+# forced (annex, and a stability collapse mid-war -- see engine.py) and
+# peaceful (propose_accession) -- share the same merge mechanics but differ
+# in transfer efficiency (conquest is wasteful; a voluntary union isn't)
+# and in whether the rest of the world reacts with alarm.
+ANNEX_ECONOMY_TRANSFER = 0.5
+ANNEX_MILITARY_TRANSFER = 0.3
+ANNEX_RESOURCE_TRANSFER = 0.5
+ANNEX_STABILITY_HIT = -10
+ANNEX_OPINION_HIT = -5
+ANNEX_RIVAL_RELATION_HIT = -15
+
+ACCESSION_ECONOMY_TRANSFER = 0.8
+ACCESSION_MILITARY_TRANSFER = 0.8
+ACCESSION_RESOURCE_TRANSFER = 0.8
+ACCESSION_OPINION_BOOST = 5
+
+
+def absorb_nation(world: World, conqueror, absorbed, *, peaceful: bool) -> None:
+    """Merge `absorbed` into `conqueror` and erase `absorbed` from the
+    world. Used by _resolve_annex, _resolve_propose_accession, and by
+    engine._check_collapses (a stability collapse that happens to a
+    nation still at war becomes annexation by the strongest enemy, not
+    erasure)."""
+    econ_frac = ACCESSION_ECONOMY_TRANSFER if peaceful else ANNEX_ECONOMY_TRANSFER
+    mil_frac = ACCESSION_MILITARY_TRANSFER if peaceful else ANNEX_MILITARY_TRANSFER
+    res_frac = ACCESSION_RESOURCE_TRANSFER if peaceful else ANNEX_RESOURCE_TRANSFER
+
+    conqueror.economy += absorbed.economy * econ_frac
+    conqueror.economic_potential += absorbed.economic_potential * econ_frac
+    conqueror.military += absorbed.military * mil_frac
+    for r in absorbed.resources:
+        conqueror.resources[r] = conqueror.resources.get(r, 0.0) + absorbed.resources.get(r, 0.0) * res_frac
+
+    if peaceful:
+        conqueror.public_opinion += ACCESSION_OPINION_BOOST
+    else:
+        conqueror.stability += ANNEX_STABILITY_HIT
+        conqueror.public_opinion += ANNEX_OPINION_HIT
+        condemners = 0
+        for other in world.alive_nations():
+            if other.id in (conqueror.id, absorbed.id):
+                continue
+            if other.government_type in ("democracy", "parliamentary"):
+                _shift_relations(other, conqueror, ANNEX_RIVAL_RELATION_HIT)
+                condemners += 1
+        if condemners:
+            world.log(f"The world's democracies condemn {conqueror.name}'s annexation of {absorbed.name}.")
+
+    absorbed.alive = False
+    world.purge_nation_references(absorbed.id)
+    conqueror.clamp_stats()
+
+
+def _resolve_annex(world: World, order: Order) -> None:
+    actor = world.get(order.actor_id)
+    target = world.get(order.target_id)
+    if target.id not in actor.at_war_with:
+        return
+    if not _is_annex_eligible(actor, target):
+        world.log(f"{actor.name} attempts to annex {target.name}, but its forces haven't been crushed decisively enough.")
+        return
+    absorb_nation(world, actor, target, peaceful=False)
+    world.log(f"{actor.name} annexes {target.name} outright, absorbing its territory and population.")
+
+
+def _resolve_propose_accession(world: World, order: Order) -> None:
+    actor = world.get(order.actor_id)  # votes to dissolve into target
+    target = world.get(order.target_id)  # absorbs actor
+    mutual_relation = min(actor.relation(target.id), target.relation(actor.id))
+    if mutual_relation < ACCESSION_RELATION_THRESHOLD:
+        world.log(f"{actor.name}'s population votes against joining {target.name}; ties remain close but sovereign.")
+        return
+    absorb_nation(world, target, actor, peaceful=True)
+    world.log(f"{actor.name} votes to join {target.name} in a peaceful union.")
 
 
 # A lightweight, deterministic sentiment lexicon -- not a language model,
@@ -390,6 +575,7 @@ RESOLVERS = {
     "build_military": _resolve_build_military,
     "invest_economy": _resolve_invest_economy,
     "invest_sector": _resolve_invest_sector,
+    "modify_constitution": _resolve_modify_constitution,
     "improve_relations": _resolve_improve_relations,
     "propose_alliance": _resolve_propose_alliance,
     "break_alliance": _resolve_break_alliance,
@@ -397,6 +583,8 @@ RESOLVERS = {
     "impose_embargo": _resolve_impose_embargo,
     "declare_war": _resolve_declare_war,
     "sue_for_peace": _resolve_sue_for_peace,
+    "annex": _resolve_annex,
+    "propose_accession": _resolve_propose_accession,
     "wildcard": _resolve_wildcard,
 }
 
