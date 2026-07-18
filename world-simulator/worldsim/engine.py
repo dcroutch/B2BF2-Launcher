@@ -277,17 +277,20 @@ def _check_collapses(world: World) -> None:
         world.log(f"{nation.name} collapses into instability and exits the world stage.")
 
 
-def game_status(world: World, player_id: str, max_turns: int = 100) -> Optional[str]:
-    """Return 'win', 'loss', or None if the game should continue."""
+def game_status(world: World, player_id: str) -> Optional[str]:
+    """Return 'win', 'loss', or None if the game should continue.
+
+    There is no turn cap: the game runs indefinitely until the player
+    loses (collapse, ousted from power/annexed), wins by eliminating
+    every other nation, or the player voluntarily ends the session (see
+    cli.py -- that's a UI-level choice, not a world-state outcome, so it
+    isn't reported here as win/loss)."""
     player = world.nations[player_id]
     if not player.alive:
         return "loss"
     if not player.in_power:
         return "loss"
     alive = world.alive_nations()
-    if world.turn >= max_turns:
-        strongest = max(alive, key=lambda n: n.economy + n.military)
-        return "win" if strongest.id == player_id else "loss"
     if len(alive) == 1 and alive[0].id == player_id:
         return "win"
     return None

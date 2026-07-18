@@ -53,6 +53,13 @@ carried out *by* China. See `tests/test_parser.py::TestActorLockGuarantee`.
 All 27 other nations pick their own orders every turn using the same
 deterministic scoring rules (`worldsim/ai.py`), seeded for reproducible runs.
 
+**There is no turn cap.** The game runs until exactly one of three things
+happens: you lose (your nation collapses, or your government falls to an
+election defeat / no-confidence vote / annexation), you win by eliminating
+every other nation, or you type `quit` (or `exit`/`retire`/...) to end the
+session on your own terms — that's a UI-level choice, reported as "GAME
+ENDED" rather than a win or loss verdict.
+
 ## Beyond the core loop
 
 - **Public opinion** (`Nation.public_opinion`) is a distinct stat from

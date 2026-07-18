@@ -133,11 +133,25 @@ seed.
 
 ## Victory / failure conditions (single-player framing)
 
-- Player nation's stability hits 0 -> collapse (loss).
-- Player conquers (reduces to 0 stability while at war and holds military
-  superiority) enough rival nations, or survives N turns as the strongest
-  economy/military -> win states, reported at run end. Kept intentionally
-  simple; scenario presets can define custom win conditions later.
+There is no turn cap. `game_status` (engine.py) no longer accepts a
+`max_turns` parameter and never forces a win/loss purely because the turn
+counter reached some number -- a prior version did ("strongest at turn
+100 wins"), which meant the game could hand out an artificial verdict
+completely disconnected from what actually happened in play. The game now
+runs until one of exactly three things happens:
+
+- **Loss**: the player's nation collapses (stability 0, `alive = False`)
+  or its government falls (election defeat, a parliamentary no-confidence
+  vote, or being annexed/acceded away -- all surfaced through `in_power`/
+  `alive`, see the government and conquest sections above).
+- **Win**: the player is the sole surviving nation (`len(alive_nations())
+  == 1`) -- i.e. actual conquest of everyone else, now reachable via the
+  annexation/collapse-during-war/civil-war mechanics above.
+- **Voluntary end**: the player types `quit`/`exit`/`retire`/etc. at the
+  CLI prompt. This is handled entirely in `cli.py` (`get_player_order`
+  returns `None` as a sentinel) -- it's a UI-level choice, not a
+  world-state outcome, so it's reported separately ("GAME ENDED") rather
+  than as a win or loss verdict.
 
 ## Project layout
 

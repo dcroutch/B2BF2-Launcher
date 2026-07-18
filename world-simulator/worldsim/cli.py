@@ -4,6 +4,7 @@ is parsed by worldsim.parser's fixed keyword rules -- not a language model."""
 from __future__ import annotations
 
 import random
+from typing import Optional
 
 from .engine import game_status, run_turn
 from .models import World
@@ -13,7 +14,9 @@ from .scenarios import default_world, list_nation_ids
 
 VALID_NATION_IDS = set(list_nation_ids())
 
-MAX_TURNS = 100
+# The game has no turn cap: it runs until the player loses, wins by
+# eliminating every other nation, or chooses to end it here.
+QUIT_COMMANDS = {"quit", "exit", "end game", "end the game", "retire", "resign", "stop playing", "stop"}
 
 
 def print_status(world: World, player_id: str) -> None:
@@ -58,14 +61,20 @@ def choose_player_order(world: World, player_id: str) -> Order:
         print("Invalid choice, try again.")
 
 
-def get_player_order(world: World, player_id: str) -> Order:
+def get_player_order(world: World, player_id: str) -> Optional[Order]:
     """Free text is the primary interface: type anything, including erratic
     or unrealistic statements ("demand a refund of the Louisiana Purchase")
     -- it always resolves to something. Type 'menu' for a numbered list of
-    known, well-defined actions instead."""
-    text = input("\nWhat does your nation do? (or 'menu' for a list): ").strip()
+    known, well-defined actions instead, or 'quit' to end the session.
+
+    Returns None to signal the player chose to end the game -- this is a
+    UI-level choice handled entirely here, not a world-state outcome, so
+    it never flows through game_status()."""
+    text = input("\nWhat does your nation do? (or 'menu' for a list, 'quit' to end): ").strip()
     if not text:
         return Order(player_id, "pass")
+    if text.lower() in QUIT_COMMANDS:
+        return None
     if text.lower() == "menu":
         return choose_player_order(world, player_id)
     return parse_command(world, player_id, text)
@@ -88,10 +97,14 @@ def main() -> None:
     while status is None:
         print_status(world, player_id)
         order = get_player_order(world, player_id)
+        if order is None:
+            print(f"\n=== GAME ENDED (turn {world.turn}, by your choice) ===")
+            print_status(world, player_id)
+            return
         run_turn(world, [order], rng)
         for line in world.event_log[-5:]:
             print(line)
-        status = game_status(world, player_id, max_turns=MAX_TURNS)
+        status = game_status(world, player_id)
 
     print(f"\n=== GAME OVER: {status.upper()} ===")
 
