@@ -85,6 +85,19 @@ def score_order(world: World, order: Order) -> float:
         mutually_exhausted = actor.military < 15 and target.military < 15
         return 6.0 if (losing or exhausted or mutually_exhausted) else -5
 
+    if order.type == "annex":
+        # Only ever legal once the target has already been crushed
+        # decisively (see orders._is_annex_eligible) -- pressing that
+        # advantage to conquest is straightforwardly attractive, scaled by
+        # just how lopsided the victory is.
+        return 8.0 + (actor.military - target.military) * 0.05
+
+    if order.type == "propose_accession":
+        # AI nations essentially never vote themselves out of existence --
+        # this keeps the order reachable (and player-driven unification
+        # fully supported) without any AI nation randomly dissolving itself.
+        return -50
+
     return -100  # unknown order types never win
 
 

@@ -96,6 +96,44 @@ deterministic scoring rules (`worldsim/ai.py`), seeded for reproducible runs.
   `tests/test_government.py::TestParserCannotDictateOtherNationsGovernment`
   and `::TestSelfDirectedRegimeChangeWithPopulationFraming`.
 
+## Conquest, annexation, civil war, and accession
+
+Sovereignty is no longer permanent. There are four ways a nation stops
+being an independent actor:
+
+- **`annex`** — forced conquest. Only legal against a nation you're
+  already at war with and have crushed decisively (its military under 15,
+  or yours more than 3x theirs). Absorbs half its economy/resources and
+  30% of its remaining military; costs you stability and public opinion,
+  and every other democracy's relations toward you cool ("The world's
+  democracies condemn X's annexation of Y").
+- **Collapse-during-war** — a nation whose stability hits 0 *while still
+  at war* is no longer just erased: the strongest enemy still fighting it
+  annexes the wreckage automatically. Sustained war is now a real,
+  reachable path to conquest, not just attrition that quietly resolves
+  itself. (A nation that collapses with no war in progress still simply
+  fails, as before.)
+- **Civil war / rebel factions** — a nation governing badly enough for
+  long enough (very low stability *and* very low public opinion at once)
+  risks part of itself breaking away into an independent rebel faction — a
+  brand-new `Nation`, born at war with its parent, that plays by the exact
+  same rules as everyone else from that point on (can sue for peace, ally,
+  grow, even eventually vote to rejoin via accession). Domestic fracturing
+  is emergent, not scripted.
+- **`propose_accession`** — peaceful, voluntary union. Only available
+  between two nations with very high mutual relations (both sides, not
+  just one); the smaller nation dissolves into the larger one at a much
+  better transfer rate than conquest (80% vs. 50%), with no international
+  alarm.
+
+**Bug fixed as part of this**: `sue_for_peace` used to check whether the
+*asker* was dominant before accepting a ceasefire — which is backwards,
+since the losing side (the realistic asker) is essentially never dominant,
+so peace always succeeded no matter how thoroughly they were being
+crushed. It now checks whether the *target* (whose consent actually
+matters) is dominant, so a decisively winning side can reject peace and
+press its advantage toward annexation instead.
+
 ## Run tests
 
 ```

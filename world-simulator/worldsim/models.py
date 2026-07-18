@@ -131,5 +131,22 @@ class World:
     def get(self, nation_id: str) -> Nation:
         return self.nations[nation_id]
 
+    def spawn_nation(self, nation: Nation) -> None:
+        """Add a newly created nation (e.g. a breakaway rebel faction) to
+        the world. It starts taking its own AI turns from the next
+        run_turn call onward."""
+        self.nations[nation.id] = nation
+
+    def purge_nation_references(self, nation_id: str) -> None:
+        """Remove a nation from every other nation's relationship sets --
+        used once a nation is annexed, accedes into another, or collapses,
+        so it doesn't linger as a phantom ally/rival/war target."""
+        for other in self.nations.values():
+            other.alliances.discard(nation_id)
+            other.trade_pacts.discard(nation_id)
+            other.at_war_with.discard(nation_id)
+            other.embargoes_against.discard(nation_id)
+            other.truce_until.pop(nation_id, None)
+
     def log(self, message: str) -> None:
         self.event_log.append(f"[T{self.turn}] {message}")

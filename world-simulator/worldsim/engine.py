@@ -5,8 +5,8 @@ import random
 from typing import Callable, Optional
 
 from .ai import choose_order
-from .models import ELECTION_TERM_LENGTH, RESOURCE_TYPES, SECTOR_TYPES, World
-from .orders import Order, resolve_orders
+from .models import ELECTION_TERM_LENGTH, RESOURCE_TYPES, SECTOR_TYPES, Nation, World
+from .orders import Order, absorb_nation, resolve_orders
 
 WAR_STABILITY_DRAIN = 2.0
 WAR_MILITARY_DRAIN = 1.5
@@ -41,6 +41,17 @@ MINOR_EVENTS = (
 MARKET_PRICE_ADJUST_RATE = 0.1
 MARKET_PRICE_MIN, MARKET_PRICE_MAX = 0.5, 2.0
 MARKET_ECONOMY_SENSITIVITY = 0.01
+
+# Domestic fracturing: a nation governing badly enough, for long enough,
+# risks part of itself breaking away into an independent rebel faction --
+# a new, fully independent Nation the rest of the world (including the
+# original) now has to deal with, not a scripted one-off event.
+CIVIL_WAR_STABILITY_THRESHOLD = 15.0
+CIVIL_WAR_OPINION_THRESHOLD = 20.0
+CIVIL_WAR_CHANCE_PER_TURN = 0.12
+CIVIL_WAR_SPLIT_FRACTION = 0.3
+CIVIL_WAR_STABILITY_SHOCK = -10.0
+CIVIL_WAR_OPINION_SHOCK = -5.0
 
 
 def run_turn(world: World, player_orders: list[Order], rng: random.Random) -> None:
@@ -143,6 +154,45 @@ def _apply_passive_effects(world: World, rng: random.Random) -> None:
             world.log(f"{nation.name} experiences {name.replace('_', ' ')}.")
 
         nation.clamp_stats()
+        _maybe_trigger_civil_war(world, nation, rng)
+
+
+def _maybe_trigger_civil_war(world: World, nation, rng: random.Random) -> None:
+    """A nation governing badly enough (very low stability *and* very low
+    public opinion, at once) risks part of itself breaking away into an
+    independent rebel faction -- domestic fracturing as a real, emergent
+    consequence, not a scripted event. The rebels are a normal Nation from
+    here on: they fight the parent, can sue for peace, ally with others,
+    grow their own economy, or eventually even accede back."""
+    if nation.stability >= CIVIL_WAR_STABILITY_THRESHOLD or nation.public_opinion >= CIVIL_WAR_OPINION_THRESHOLD:
+        return
+    if rng.random() >= CIVIL_WAR_CHANCE_PER_TURN:
+        return
+
+    rebels = Nation(
+        id=f"{nation.id}_rebels_t{world.turn}",
+        name=f"{nation.name} Rebel Faction",
+        stability=40.0,
+        military=nation.military * CIVIL_WAR_SPLIT_FRACTION,
+        economy=nation.economy * CIVIL_WAR_SPLIT_FRACTION,
+        public_opinion=50.0,
+        government_type="authoritarian",
+        election_due_turn=world.turn + ELECTION_TERM_LENGTH,
+    )
+    for r in nation.resources:
+        rebels.resources[r] = nation.resources[r] * CIVIL_WAR_SPLIT_FRACTION
+        nation.resources[r] *= 1 - CIVIL_WAR_SPLIT_FRACTION
+    nation.military *= 1 - CIVIL_WAR_SPLIT_FRACTION
+    nation.economy *= 1 - CIVIL_WAR_SPLIT_FRACTION
+    nation.stability += CIVIL_WAR_STABILITY_SHOCK
+    nation.public_opinion += CIVIL_WAR_OPINION_SHOCK
+
+    rebels.at_war_with.add(nation.id)
+    nation.at_war_with.add(rebels.id)
+    rebels.clamp_stats()
+    nation.clamp_stats()
+    world.spawn_nation(rebels)
+    world.log(f"{nation.name} fractures under the strain: a rebel faction breaks away and declares independence!")
 
 
 def _update_market_prices(world: World) -> None:
@@ -203,14 +253,28 @@ def _oust_leader(world: World, nation) -> None:
 
 def _check_collapses(world: World) -> None:
     for nation in world.alive_nations():
-        if nation.stability <= COLLAPSE_STABILITY:
-            nation.alive = False
-            for other in world.nations.values():
-                other.alliances.discard(nation.id)
-                other.trade_pacts.discard(nation.id)
-                other.at_war_with.discard(nation.id)
-                other.embargoes_against.discard(nation.id)
-            world.log(f"{nation.name} collapses into instability and exits the world stage.")
+        if nation.stability > COLLAPSE_STABILITY:
+            continue
+
+        if nation.at_war_with:
+            # A nation that collapses while still at war doesn't just
+            # vanish -- the strongest enemy still fighting it annexes the
+            # wreckage. This is what makes sustained war a real, reachable
+            # path to conquest rather than just attrition that fades away
+            # once a nation happens to fall apart.
+            conqueror_id = max(
+                nation.at_war_with,
+                key=lambda nid: world.nations[nid].military if nid in world.nations else -1.0,
+            )
+            conqueror = world.nations.get(conqueror_id)
+            if conqueror is not None and conqueror.alive:
+                absorb_nation(world, conqueror, nation, peaceful=False)
+                world.log(f"{conqueror.name} annexes the collapsed {nation.name} amid war.")
+                continue
+
+        nation.alive = False
+        world.purge_nation_references(nation.id)
+        world.log(f"{nation.name} collapses into instability and exits the world stage.")
 
 
 def game_status(world: World, player_id: str, max_turns: int = 100) -> Optional[str]:

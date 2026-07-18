@@ -288,6 +288,98 @@ nation playing still gets blocked, since then `earliest_id` (Canada) does
 differ from `player_id`. See
 `TestSelfDirectedRegimeChangeWithPopulationFraming` in the same file.
 
+## Sovereignty changes: conquest, annexation, civil war, accession
+
+A prior full-game playthrough reached turn-cap dominance but never true
+conquest, because there was no mechanic for one nation to actually absorb
+another -- wars only ever caused temporary attrition that recovered once
+a ceasefire landed. This closes that gap with four related mechanics that
+all funnel through one shared merge function.
+
+### `absorb_nation` (orders.py)
+
+A single function used by every path that removes a nation from the map
+by folding it into another: `_resolve_annex`, `_resolve_propose_accession`,
+and `engine._check_collapses`'s war-collapse branch. It takes a
+`peaceful: bool` flag that controls transfer efficiency (conquest wastes
+half of what it takes; a voluntary union keeps 80%) and whether the rest
+of the world reacts with alarm (forced annexation alarms every other
+democracy via `_shift_relations`; peaceful accession doesn't touch anyone
+else's relations). It always: transfers a fraction of economy/economic_potential/
+military/resources, sets `absorbed.alive = False`, and calls
+`world.purge_nation_references(absorbed.id)` so no other nation is left
+holding a stale alliance/trade-pact/war/embargo/truce reference to a
+nation that no longer exists.
+
+### Forced conquest: `annex`
+
+Legal only against a nation the actor is already at war with *and* has
+crushed decisively (`_is_annex_eligible`: target military under 15, or
+actor's more than 3x the target's). This is deliberately the same
+"crushed" threshold that triggers a losing side's own strong urge to sue
+for peace -- which is exactly why the `sue_for_peace` bug fix below
+mattered: without it, the losing side could always escape via peace
+before the winner ever got a turn to annex.
+
+### The `sue_for_peace` bug this all depended on fixing
+
+`_resolve_sue_for_peace` checked `actor_winning = actor.military >
+target.military * 1.3` where `actor` is *the nation asking for peace*.
+Since the realistic asker is the losing side, `actor_winning` was nearly
+always false, so peace nearly always succeeded -- meaning a decisively
+dominant side could never press its advantage; the war just ended the
+moment the loser asked, no matter how lopsided the fight was. Fixed to
+check the *target's* (the side being asked, whose consent should actually
+matter) dominance instead: `target_dominant = target.military >
+actor.military * 1.3`. Now a losing side's peace offer can be rejected
+("presses its advantage and rejects..."), which is what makes annexation
+(and collapse-during-war annexation) reachable at all rather than
+theoretical.
+
+### Collapse-during-war becomes annexation, not erasure
+
+`engine._check_collapses` used to just set `alive = False` on any nation
+whose stability hit 0. Now: if that nation is still at war when it
+collapses, the strongest nation among its `at_war_with` set (by military)
+annexes it via `absorb_nation(..., peaceful=False)` instead. A nation that
+collapses with no war in progress still just fails, unchanged. This is
+what makes sustained warfare a *reliable* path to conquest -- you don't
+have to time an explicit `annex` order perfectly; grinding an enemy down
+across a long war eventually finishes the job on its own. Verified in a
+400-turn simulation: Russia, fighting the whole NATO bloc after attacking
+Poland, rejected multiple ceasefire offers while still dominant, then its
+own stability collapsed from fighting on too many fronts at once, and the
+strongest nation among its enemies (the US) automatically annexed it --
+with a rebel faction (see below) having already broken off in the same
+turn and surviving independently afterward.
+
+### Civil war / rebel factions (`engine._maybe_trigger_civil_war`)
+
+A nation with both stability and public opinion below extreme thresholds
+(15 / 20) rolls a 12%-per-turn chance to fracture: a brand-new `Nation`
+(`world.spawn_nation`) is created holding 30% of the parent's military,
+economy, and resources; the parent keeps the other 70% plus an additional
+stability/opinion shock for the trauma of the split. The rebel faction is
+born at war with its parent and is otherwise a completely ordinary
+nation from that point on -- no special-cased AI, no scripted rebel
+behavior. It picks orders via the same `ai.score_order` everyone else
+uses, meaning it can sue for peace, build alliances, invest in its
+economy, or even vote to (re)join a nation later via `propose_accession`.
+This is the "domestic fracturing into rebel zones" requirement: emergent,
+not a one-off event.
+
+### Peaceful accession (`propose_accession`)
+
+The non-violent counterpart: legal only when *both* sides' relations
+toward each other are already very high (>=70, checked both directions so
+one side can't force it), a small nation can vote to dissolve into a
+larger one. No target penalty, no international alarm, better transfer
+efficiency than conquest -- modeling something like a plebiscite/merger
+rather than a war of absorption. AI nations essentially never propose
+this for themselves (scored -50 in `ai.py`, same pattern as
+`modify_constitution`), keeping it a player-driven, deliberate choice
+while remaining fully available to the player.
+
 ## Testing strategy
 
 Unit tests per module (models validity, each order's resolution effect in

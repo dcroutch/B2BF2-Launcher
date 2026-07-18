@@ -84,11 +84,16 @@ class TestPublicOpinion(unittest.TestCase):
         self.assertLess(world.get("b").public_opinion, before)
 
     def test_losing_side_suing_for_peace_is_a_humiliation_hit(self):
-        world = make_world(a={"military": 5}, b={"military": 90})
+        # target (b) must not be dominant enough to reject the offer
+        # outright (target.military <= actor.military * 1.3) but actor (a)
+        # must still be behind enough to count as "losing" for the opinion
+        # hit (actor.military < target.military * 0.8).
+        world = make_world(a={"military": 100}, b={"military": 127})
         world.get("a").at_war_with.add("b")
         world.get("b").at_war_with.add("a")
         before = world.get("a").public_opinion
         resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        self.assertNotIn("b", world.get("a").at_war_with)  # sanity: peace did succeed
         self.assertLess(world.get("a").public_opinion, before)
 
 
