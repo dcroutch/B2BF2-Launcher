@@ -30,10 +30,27 @@ snapshot that informed the design, and `DESIGN.md` for the full design doc.
 
 ## Play
 
+**Terminal:**
+
 ```
 cd world-simulator
 python3 run.py
 ```
+
+**Web app:**
+
+```
+cd world-simulator
+python3 run_web.py
+```
+
+then open http://127.0.0.1:8000/ in a browser. This is a small stdlib-only
+JSON API (`worldsim/web.py`, built on `wsgiref` — no Flask/Django, no
+external dependencies) serving a single embedded HTML/CSS/JS page in front
+of the exact same deterministic engine the CLI uses. Game state lives
+server-side per browser session (an httponly cookie), so multiple people
+can each play their own game against the same running server. Same rules
+apply: free text or a menu, no AI/LLM anywhere, no turn cap.
 
 Type what your nation does in plain English each turn — "invade Iran",
 "embargo Russia", "invest in our technology sector", "propose an alliance
@@ -162,4 +179,6 @@ python3 -m unittest discover -s tests -v
   events), check win/loss.
 - `worldsim/scenarios.py` — starting-world preset (data only).
 - `worldsim/cli.py` — interactive terminal loop (free text, with a `menu` fallback).
+- `worldsim/web.py` — stdlib-only WSGI JSON API + embedded single-page UI
+  (`run_web.py` is the entry point).
 - `tests/` — unit tests per module.

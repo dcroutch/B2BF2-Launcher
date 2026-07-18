@@ -168,13 +168,49 @@ world-simulator/
     engine.py       # turn loop, passive effects, events
     scenarios.py    # starting-world presets (data, no logic)
     cli.py          # interactive terminal game loop
+    parser.py       # deterministic free-text -> Order parser
+    web.py          # stdlib WSGI JSON API + embedded single-page UI
   tests/
     test_models.py
     test_orders.py
     test_ai.py
     test_engine.py
-  run.py            # entry point: python run.py
+    test_web.py
+  run.py            # entry point: python run.py (terminal)
+  run_web.py        # entry point: python run_web.py (browser)
 ```
+
+## Web app (worldsim/web.py)
+
+Same engine, a different front end -- no game logic lives in this file,
+only request handling and JSON/HTML serialization. Deliberately built on
+just the standard library (`wsgiref.simple_server`, `http.cookies`,
+`json`) rather than a framework like Flask, since the rest of the project
+has zero external dependencies and this shouldn't be the exception.
+
+- **Session model**: each browser gets an httponly cookie
+  (`con_sid`) minted by `POST /api/new`; the actual `World`/`Random`/
+  `player_id` live server-side in an in-memory `SESSIONS` dict keyed by
+  that cookie value. Nothing about game state is trusted from the client
+  beyond the order text/menu index -- the same trust boundary the CLI has,
+  just over HTTP instead of stdin.
+- **Endpoints**: `GET /` (the page), `GET /api/nations`, `POST /api/new`,
+  `GET /api/state`, `POST /api/menu`, `POST /api/order` (either `{"text":
+  ...}` through the same `parser.parse_command` the CLI uses, or
+  `{"index": N}` against the same `legal_orders` list the menu came from),
+  `POST /api/quit`. A finished game (`game_status` returns non-`None`) or
+  an explicit quit both clear the session server-side.
+- **Log delivery**: `event_log` is returned incrementally -- each session
+  tracks a `log_cursor` (how much of `world.event_log` the client has
+  already seen) so repeated polling/turns don't resend the whole growing
+  log every time.
+- **Routing fix found while testing**: the first version required an
+  active session for *any* unrecognized path before checking whether the
+  path was even a real route, so `GET /anything-typoed` returned "no
+  active game" (400) instead of 404. Fixed by checking path/method against
+  an explicit set of session-requiring routes first; everything else
+  (including typos) now correctly 404s regardless of session state. Caught
+  by `tests/test_web.py::TestIndexPage::test_unknown_path_is_404`.
 
 ## Free text, the actor-lock guarantee, and chaotic input
 
