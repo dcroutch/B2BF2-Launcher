@@ -135,6 +135,55 @@ class TestOrders(unittest.TestCase):
         # the first (log_cursor bookkeeping).
         self.assertTrue(set(second["log"]).isdisjoint(set(first["log"])) or not first["log"])
 
+    def test_read_only_state_polls_do_not_consume_the_log_cursor(self):
+        # Regression test: GET /api/state used to advance log_cursor just
+        # like a turn-advancing action, so two polls in a row (two tabs,
+        # a refresh racing a background poll) would silently split the
+        # new log lines between them -- the first poll would consume them,
+        # and the second would see nothing, even though it never actually
+        # received them either.
+        cookie, _ = new_game("usa")
+        sid = cookie.split("=")[1]
+        web.SESSIONS[sid]["world"].event_log.append("[T0] a new event happens")
+
+        status1, _, state1 = call("GET", "/api/state", cookie=cookie)
+        status2, _, state2 = call("GET", "/api/state", cookie=cookie)
+        self.assertEqual(status1, "200 OK")
+        self.assertEqual(status2, "200 OK")
+        # Both reads must see the same not-yet-consumed log line -- a
+        # read-only endpoint has to be safe to call repeatedly.
+        self.assertIn("[T0] a new event happens", state1["log"])
+        self.assertEqual(state1["log"], state2["log"])
+
+        # Since the reads above never advanced the cursor, the injected
+        # line is still unconsumed and the next turn-advancing action
+        # correctly delivers it (proving it was never silently dropped).
+        _, _, order_result = call("POST", "/api/order", {"text": "pass"}, cookie=cookie)
+        self.assertIn("[T0] a new event happens", order_result["log"])
+
+        # And now that a mutating action *has* run, a further read sees
+        # nothing new -- the cursor really did advance this time.
+        _, _, state3 = call("GET", "/api/state", cookie=cookie)
+        self.assertEqual(state3["log"], [])
+
+    def test_menu_index_is_revalidated_against_current_state_not_a_stale_cache(self):
+        # Regression test: /api/order used to reuse whatever list /api/menu
+        # last cached, without re-checking it against the world state at
+        # the moment the index is actually submitted. If the option set
+        # changes shape between the menu fetch and the order (a turn
+        # passes, a nation is annexed, a rebel faction spawns), a stale
+        # index could resolve to a completely different, unintended order.
+        cookie, _ = new_game("usa")
+        status, _, menu_before = call("POST", "/api/menu", {}, cookie=cookie)
+        # Advance a turn so the world (and therefore legal_orders) changes.
+        call("POST", "/api/order", {"text": "pass"}, cookie=cookie)
+        status, _, menu_after = call("POST", "/api/menu", {}, cookie=cookie)
+        # Submitting an index now must be checked against *this* menu,
+        # not whatever was cached from the first /api/menu call.
+        index = len(menu_after["options"]) - 1
+        status, _, payload = call("POST", "/api/order", {"index": index}, cookie=cookie)
+        self.assertEqual(status, "200 OK")
+
 
 class TestGameEndReflectedOverHttp(unittest.TestCase):
     def test_status_field_reports_loss_when_player_collapses(self):
@@ -147,6 +196,25 @@ class TestGameEndReflectedOverHttp(unittest.TestCase):
         # A finished game should also clear the session server-side.
         status, _, payload = call("GET", "/api/state", cookie=cookie)
         self.assertEqual(status, "400 Bad Request")
+
+
+class TestSessionExpiry(unittest.TestCase):
+    def test_idle_sessions_are_pruned_on_new_game_creation(self):
+        # Regression test: SESSIONS never expired abandoned games, so a
+        # browser that starts a game and never quits leaked its full
+        # World object for the life of the server process.
+        cookie, _ = new_game("usa")
+        sid = cookie.split("=")[1]
+        self.assertIn(sid, web.SESSIONS)
+        web.SESSIONS[sid]["last_active"] = 0  # force it to look ancient
+        new_game("china")  # any /api/new sweeps expired sessions
+        self.assertNotIn(sid, web.SESSIONS)
+
+    def test_active_sessions_are_not_pruned(self):
+        cookie, _ = new_game("usa")
+        sid = cookie.split("=")[1]
+        new_game("china")
+        self.assertIn(sid, web.SESSIONS)
 
 
 if __name__ == "__main__":

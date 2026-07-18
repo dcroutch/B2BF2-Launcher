@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import random
 import secrets
+import time
 from http.cookies import SimpleCookie
 from wsgiref.simple_server import make_server
 
@@ -23,8 +24,22 @@ from .scenarios import default_world, list_nation_ids
 
 SESSION_COOKIE = "con_sid"
 
-# sid -> {"world": World, "rng": Random, "player_id": str, "log_cursor": int}
+# A browser that starts a game and never quits (closes the tab, walks away)
+# would otherwise leak its full World object -- 28+ Nations, a growing
+# event log, potentially more nations from civil-war spawns -- for the
+# life of the server process. Sessions untouched this long are swept.
+SESSION_IDLE_TIMEOUT_SECONDS = 2 * 60 * 60
+
+# sid -> {"world": World, "rng": Random, "player_id": str, "log_cursor": int,
+#         "last_active": float}
 SESSIONS: dict = {}
+
+
+def _prune_expired_sessions() -> None:
+    cutoff = time.time() - SESSION_IDLE_TIMEOUT_SECONDS
+    expired = [sid for sid, s in SESSIONS.items() if s.get("last_active", 0) < cutoff]
+    for sid in expired:
+        SESSIONS.pop(sid, None)
 
 
 def _new_session_id() -> str:
@@ -54,7 +69,13 @@ def _nation_view(world: World, nation_id: str) -> dict:
     }
 
 
-def _state_payload(session: dict, status=None, ended: bool = False) -> dict:
+def _state_payload(session: dict, status=None, ended: bool = False, advance_cursor: bool = True) -> dict:
+    """Build the JSON state payload. advance_cursor=False (used by the
+    read-only GET /api/state) returns the log lines since the last
+    *advancing* call without consuming them -- otherwise two polls in
+    quick succession (two tabs on one session, a refresh racing a
+    background poll) would each see only half the new log lines, since
+    the first poll would have already moved the cursor past them."""
     world = session["world"]
     player_id = session["player_id"]
     others = [
@@ -65,7 +86,8 @@ def _state_payload(session: dict, status=None, ended: bool = False) -> dict:
     ]
     cursor = session.get("log_cursor", 0)
     new_log = world.event_log[cursor:]
-    session["log_cursor"] = len(world.event_log)
+    if advance_cursor:
+        session["log_cursor"] = len(world.event_log)
     return {
         "turn": world.turn,
         "player": _nation_view(world, player_id),
@@ -88,16 +110,18 @@ def _menu_payload(session: dict) -> dict:
         else:
             label = order.type
         items.append({"index": i, "label": label})
-    session["_menu_cache"] = options
     return {"options": items}
 
 
-def _get_session(environ) -> dict | None:
+def _sid_from_cookie(environ) -> str:
     cookie = SimpleCookie(environ.get("HTTP_COOKIE", ""))
     morsel = cookie.get(SESSION_COOKIE)
-    if morsel is None:
-        return None
-    return SESSIONS.get(morsel.value)
+    return morsel.value if morsel else ""
+
+
+def _get_session(environ) -> dict | None:
+    sid = _sid_from_cookie(environ)
+    return SESSIONS.get(sid) if sid else None
 
 
 def _read_json_body(environ) -> dict:
@@ -138,6 +162,7 @@ def application(environ, start_response):
         return _json_response(start_response, {"nations": list_nation_ids()})
 
     if method == "POST" and path == "/api/new":
+        _prune_expired_sessions()
         data = _read_json_body(environ)
         player_id = data.get("nation", "usa")
         if player_id not in list_nation_ids():
@@ -150,6 +175,7 @@ def application(environ, start_response):
             "rng": random.Random(seed),
             "player_id": player_id,
             "log_cursor": 0,
+            "last_active": time.time(),
         }
         payload = _state_payload(SESSIONS[sid])
         return _json_response(start_response, payload, set_cookie=sid)
@@ -167,11 +193,12 @@ def application(environ, start_response):
     session = _get_session(environ)
     if session is None:
         return _json_response(start_response, {"error": "no active game -- call /api/new first"}, "400 Bad Request")
+    session["last_active"] = time.time()
 
     if method == "GET" and path == "/api/state":
         world = session["world"]
         status = game_status(world, session["player_id"])
-        return _json_response(start_response, _state_payload(session, status=status))
+        return _json_response(start_response, _state_payload(session, status=status, advance_cursor=False))
 
     if method == "POST" and path == "/api/menu":
         return _json_response(start_response, _menu_payload(session))
@@ -182,7 +209,11 @@ def application(environ, start_response):
         text = str(data.get("text", "")).strip()
         index = data.get("index")
         if index is not None:
-            options = session.get("_menu_cache") or list(legal_orders(world, player_id))
+            # Always recompute fresh against the current world state --
+            # caching this across requests risks resolving a stale index
+            # against a roster that's since changed (a nation annexed, a
+            # civil-war rebel spawned), silently applying the wrong order.
+            options = list(legal_orders(world, player_id))
             if not isinstance(index, int) or not (0 <= index < len(options)):
                 return _json_response(start_response, {"error": "invalid menu index"}, "400 Bad Request")
             order = options[index]
@@ -195,22 +226,16 @@ def application(environ, start_response):
         status = game_status(world, player_id)
         payload = _state_payload(session, status=status)
         if status is not None:
-            SESSIONS.pop(_sid_from_environ(environ), None)
+            SESSIONS.pop(_sid_from_cookie(environ), None)
         return _json_response(start_response, payload)
 
     if method == "POST" and path == "/api/quit":
         payload = _state_payload(session, ended=True)
-        SESSIONS.pop(_sid_from_environ(environ), None)
+        SESSIONS.pop(_sid_from_cookie(environ), None)
         return _json_response(start_response, payload)
 
     start_response("404 Not Found", [("Content-Type", "text/plain")])
     return [b"not found"]
-
-
-def _sid_from_environ(environ) -> str:
-    cookie = SimpleCookie(environ.get("HTTP_COOKIE", ""))
-    morsel = cookie.get(SESSION_COOKIE)
-    return morsel.value if morsel else ""
 
 
 INDEX_HTML = r"""<!doctype html>

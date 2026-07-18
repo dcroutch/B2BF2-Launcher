@@ -262,8 +262,16 @@ def _check_collapses(world: World) -> None:
             # wreckage. This is what makes sustained war a real, reachable
             # path to conquest rather than just attrition that fades away
             # once a nation happens to fall apart.
+            # Sort by id before picking the max: nation.at_war_with is a
+            # set, and Python's string hash randomization means set
+            # iteration order isn't stable across process restarts even
+            # with the same world.seed. An exact-military tie between two
+            # enemies could otherwise pick a different conqueror on a
+            # different run, breaking the "same seed, same replay"
+            # determinism guarantee. Breaking ties by id keeps the choice
+            # a pure function of world state.
             conqueror_id = max(
-                nation.at_war_with,
+                sorted(nation.at_war_with),
                 key=lambda nid: world.nations[nid].military if nid in world.nations else -1.0,
             )
             conqueror = world.nations.get(conqueror_id)

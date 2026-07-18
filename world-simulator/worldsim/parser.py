@@ -45,6 +45,8 @@ def _find(lowered: str, phrase: str) -> int:
 # specific/unambiguous verbs first, so "trade war" doesn't accidentally
 # match plain "war" before "trade" is considered, etc.
 VERB_RULES = (
+    ("annex", ("annex", "absorb", "annexation")),
+    ("propose_accession", ("vote to join", "accede to", "join the union", "unite with", "merge into", "petition to join")),
     ("sue_for_peace", ("sue for peace", "cease fire", "ceasefire", "end the war", "make peace", "stop the war", "surrender")),
     ("declare_war", ("declare war", "invade", "attack", "wage war", "go to war", "bomb", "conquer")),
     ("impose_embargo", ("embargo", "sanction", "blockade", "boycott")),
@@ -146,6 +148,16 @@ def parse_command(world: World, player_id: str, text: str) -> Order:
     for alias, nid in nation_lookup.items():
         idx = _find(lowered, alias)
         if idx == -1:
+            continue
+        # A possessive mention ("Germany's collapse") is a modifier, not
+        # the sentence's subject or its intended target -- counting it as
+        # either silently mangles a legitimate order (e.g. "Following
+        # Germany's collapse, we annex Poland" both tripping the
+        # impersonation guard on "Germany" *and* picking Germany, not
+        # Poland, as the annex target).
+        after = lowered[idx + len(alias):idx + len(alias) + 2]
+        possessive = after in ("'s", "’s")
+        if possessive:
             continue
         if earliest_pos is None or idx < earliest_pos:
             earliest_id, earliest_pos = nid, idx

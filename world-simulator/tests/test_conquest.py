@@ -236,5 +236,35 @@ class TestConquestGameStatus(unittest.TestCase):
         self.assertEqual(game_status(world, "a"), "loss")
 
 
+class TestConquerorTiebreakIsDeterministic(unittest.TestCase):
+    def test_exact_military_tie_among_enemies_picks_by_id_not_set_order(self):
+        # Regression test: the conqueror pick used to run max() directly
+        # over the `at_war_with` set. Set iteration order for string keys
+        # depends on Python's per-process hash randomization, so an exact
+        # military tie between two enemies could pick a different
+        # conqueror on different process runs even with the same
+        # world.seed -- breaking the "same seed, same replay" guarantee.
+        # Sorting by id before the tie-break makes the choice a pure
+        # function of world state alone.
+        # c collapses while at war with both a and b, who have exactly
+        # equal military -- "a" sorts before "b", so a should always be
+        # the one that annexes c, on every run, regardless of process-level
+        # hash randomization.
+        winners = set()
+        for _ in range(20):
+            world = World(nations={
+                "a": Nation(id="a", name="A", military=50, at_war_with={"c"}),
+                "b": Nation(id="b", name="B", military=50, at_war_with={"c"}),
+                "c": Nation(id="c", name="C", military=0, stability=0, at_war_with={"a", "b"}),
+            })
+            _check_collapses(world)
+            self.assertFalse(world.get("c").alive)  # c is always annexed
+            self.assertTrue(world.get("b").alive)  # b is never involved
+            winners.add(world.get("a").economy)  # a grew iff it was the conqueror
+        # Every run must agree on the same winner: a always annexes c.
+        self.assertTrue(world.get("a").alive)
+        self.assertGreater(world.get("a").economy, 50.0)
+
+
 if __name__ == "__main__":
     unittest.main()
