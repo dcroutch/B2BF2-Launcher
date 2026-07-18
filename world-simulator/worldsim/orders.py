@@ -194,6 +194,8 @@ def _enter_war(world: World, side_a, side_b) -> None:
         return
     side_a.alliances.discard(side_b.id)
     side_b.alliances.discard(side_a.id)
+    side_a.trade_pacts.discard(side_b.id)
+    side_b.trade_pacts.discard(side_a.id)
     side_a.at_war_with.add(side_b.id)
     side_b.at_war_with.add(side_a.id)
 

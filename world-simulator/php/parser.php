@@ -15,7 +15,7 @@ require_once __DIR__ . '/orders.php';
 const VERB_RULES = [
     ['annex', ['annex', 'absorb', 'annexation']],
     ['propose_accession', ['vote to join', 'accede to', 'join the union', 'unite with', 'merge into', 'petition to join']],
-    ['sue_for_peace', ['sue for peace', 'cease fire', 'ceasefire', 'end the war', 'make peace', 'stop the war', 'surrender']],
+    ['sue_for_peace', ['sue for peace', 'cease fire', 'ceasefire', 'end the war', 'make peace', 'stop the war', 'surrender', 'surrenders', 'surrendered']],
     ['declare_war', ['declare war', 'invade', 'attack', 'wage war', 'go to war', 'bomb', 'conquer']],
     ['impose_embargo', ['embargo', 'sanction', 'blockade', 'boycott']],
     ['break_alliance', ['break alliance', 'break our alliance', 'betray', 'abandon our alliance', 'end alliance', 'end our alliance']],
@@ -71,6 +71,23 @@ function find_phrase(string $lowered, string $phrase): int {
     return -1;
 }
 
+// Like find_phrase, but returns the earliest occurrence of $phrase that
+// isn't a possessive mention ("Germany's collapse"). A plain first-match
+// find_phrase would stop at that possessive occurrence and never see a
+// later, legitimate one -- e.g. "Following France's defeat, France
+// surrenders" names France twice; only the second is the real subject.
+function find_phrase_non_possessive(string $lowered, string $phrase): int {
+    if (!preg_match_all('/\b' . preg_quote($phrase, '/') . '\b/u', $lowered, $m, PREG_OFFSET_CAPTURE)) {
+        return -1;
+    }
+    foreach ($m[0] as [$match, $idx]) {
+        $after = mb_substr($lowered, $idx + mb_strlen($match), 2);
+        if ($after === "'s" || $after === "\u{2019}s") continue;
+        return $idx;
+    }
+    return -1;
+}
+
 function nation_lookup(array $world): array {
     $lookup = [];
     foreach (alive_nations($world) as $n) {
@@ -104,12 +121,8 @@ function parse_command(array $world, string $playerId, string $text): array {
     $earliestId = null; $earliestPos = null;
     $targetId = null; $targetPos = null;
     foreach ($lookup as $alias => $nid) {
-        $idx = find_phrase($lowered, $alias);
+        $idx = find_phrase_non_possessive($lowered, $alias);
         if ($idx === -1) continue;
-        // A possessive mention ("Germany's collapse") is a modifier, not
-        // the sentence's subject or its intended target.
-        $after = mb_substr($lowered, $idx + mb_strlen($alias), 2);
-        if ($after === "'s" || $after === "\u{2019}s") continue;
 
         if ($earliestPos === null || $idx < $earliestPos) {
             $earliestId = $nid; $earliestPos = $idx;

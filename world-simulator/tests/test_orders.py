@@ -94,6 +94,17 @@ class TestResolveOrders(unittest.TestCase):
         resolve_orders(world, [Order("a", "declare_war", "b")])
         self.assertNotIn("b", world.get("a").alliances)
 
+    def test_declare_war_breaks_existing_trade_pact(self):
+        # Regression: entering a war used to sever the alliance but leave
+        # any trade pact intact, letting two nations at war keep collecting
+        # the mutual trade-pact economy boost every turn.
+        world = make_world()
+        world.get("a").trade_pacts.add("b")
+        world.get("b").trade_pacts.add("a")
+        resolve_orders(world, [Order("a", "declare_war", "b")])
+        self.assertNotIn("b", world.get("a").trade_pacts)
+        self.assertNotIn("a", world.get("b").trade_pacts)
+
     def test_sue_for_peace_rejected_when_target_is_dominant(self):
         # The realistic case: the losing side (a, weak) asks the dominant
         # side (b, strong) for peace. b has the actual say and, being

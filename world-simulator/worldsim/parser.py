@@ -41,13 +41,32 @@ def _find(lowered: str, phrase: str) -> int:
     match = re.search(r"\b" + re.escape(phrase) + r"\b", lowered)
     return match.start() if match else -1
 
+
+def _find_non_possessive(lowered: str, phrase: str) -> int:
+    """Like _find, but returns the earliest occurrence of `phrase` that
+    isn't a possessive mention ("Germany's collapse"). A plain first-match
+    _find would stop at that possessive occurrence and never see a later,
+    legitimate one -- e.g. "Following France's defeat, France surrenders"
+    has France named twice; only the second is the sentence's real
+    subject, and a nation mentioned only possessively must never count as
+    one purely because an earlier, unrelated possessive of the same name
+    happened to come first in the text."""
+    pattern = re.compile(r"\b" + re.escape(phrase) + r"\b")
+    for match in pattern.finditer(lowered):
+        idx = match.start()
+        after = lowered[match.end():match.end() + 2]
+        if after in ("'s", "’s"):
+            continue
+        return idx
+    return -1
+
 # (order_type, keywords) -- checked in this fixed priority order, most
 # specific/unambiguous verbs first, so "trade war" doesn't accidentally
 # match plain "war" before "trade" is considered, etc.
 VERB_RULES = (
     ("annex", ("annex", "absorb", "annexation")),
     ("propose_accession", ("vote to join", "accede to", "join the union", "unite with", "merge into", "petition to join")),
-    ("sue_for_peace", ("sue for peace", "cease fire", "ceasefire", "end the war", "make peace", "stop the war", "surrender")),
+    ("sue_for_peace", ("sue for peace", "cease fire", "ceasefire", "end the war", "make peace", "stop the war", "surrender", "surrenders", "surrendered")),
     ("declare_war", ("declare war", "invade", "attack", "wage war", "go to war", "bomb", "conquer")),
     ("impose_embargo", ("embargo", "sanction", "blockade", "boycott")),
     ("break_alliance", ("break alliance", "break our alliance", "betray", "abandon our alliance", "end alliance", "end our alliance")),
@@ -146,18 +165,18 @@ def parse_command(world: World, player_id: str, text: str) -> Order:
     earliest_id, earliest_pos = None, None
     target_id, target_pos = None, None
     for alias, nid in nation_lookup.items():
-        idx = _find(lowered, alias)
-        if idx == -1:
-            continue
         # A possessive mention ("Germany's collapse") is a modifier, not
         # the sentence's subject or its intended target -- counting it as
         # either silently mangles a legitimate order (e.g. "Following
         # Germany's collapse, we annex Poland" both tripping the
         # impersonation guard on "Germany" *and* picking Germany, not
-        # Poland, as the annex target).
-        after = lowered[idx + len(alias):idx + len(alias) + 2]
-        possessive = after in ("'s", "’s")
-        if possessive:
+        # Poland, as the annex target). Skip past it to find this alias's
+        # earliest non-possessive occurrence, if any, since a name used
+        # possessively once elsewhere in the text doesn't mean every
+        # occurrence of it is -- see "Following France's defeat, France
+        # surrenders", where the second "France" is the real subject.
+        idx = _find_non_possessive(lowered, alias)
+        if idx == -1:
             continue
         if earliest_pos is None or idx < earliest_pos:
             earliest_id, earliest_pos = nid, idx

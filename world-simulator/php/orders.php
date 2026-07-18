@@ -147,6 +147,8 @@ function enter_war(array &$world, string $aId, string $bId): void {
     if (set_has($a['at_war_with'], $bId)) return;
     set_remove($a['alliances'], $bId);
     set_remove($b['alliances'], $aId);
+    set_remove($a['trade_pacts'], $bId);
+    set_remove($b['trade_pacts'], $aId);
     set_add($a['at_war_with'], $bId);
     set_add($b['at_war_with'], $aId);
 }
@@ -471,7 +473,15 @@ const ORDER_RESOLVERS = [
 ];
 
 function resolve_orders(array &$world, array $orders): void {
-    usort($orders, fn($a, $b) => ORDER_PRIORITY[$a['type']] <=> ORDER_PRIORITY[$b['type']]);
+    // usort() only guarantees stability on PHP >= 8.0; tag each order with
+    // its original index and break priority ties on it explicitly so
+    // resolution order is deterministic on older PHP hosts too.
+    $indexed = array_values($orders);
+    $keyed = array_map(fn($o, $i) => [$o, $i], $indexed, array_keys($indexed));
+    usort($keyed, function ($a, $b) {
+        return [ORDER_PRIORITY[$a[0]['type']], $a[1]] <=> [ORDER_PRIORITY[$b[0]['type']], $b[1]];
+    });
+    $orders = array_map(fn($pair) => $pair[0], $keyed);
     foreach ($orders as $order) {
         $actorId = $order['actor_id'];
         if (!isset($world['nations'][$actorId]) || !$world['nations'][$actorId]['alive']) continue;

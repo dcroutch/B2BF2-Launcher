@@ -133,6 +133,18 @@ class TestPossessiveMentionIsNotTreatedAsSubject(unittest.TestCase):
         self.assertEqual(order.actor_id, "usa")
         self.assertEqual(order.type, "wildcard")
 
+    def test_later_non_possessive_mention_of_the_same_nation_is_still_found(self):
+        # Regression: the same nation named twice, first possessively then
+        # as the real subject, used to be missed entirely -- a plain
+        # first-match search stopped at the possessive occurrence and never
+        # looked further, so the later, legitimate mention was invisible.
+        world = default_world(player_id="usa")
+        order = parse_command(
+            world, "usa", "Following France's defeat, France surrenders"
+        )
+        self.assertEqual(order.actor_id, "usa")
+        self.assertEqual(order.target_id, "france")
+
 
 if __name__ == "__main__":
     unittest.main()
