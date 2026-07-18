@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from .models import ELECTION_TERM_LENGTH, GOVERNMENT_TYPES, SECTOR_COMMODITY, SECTOR_TYPES, World
+from .models import ELECTION_TERM_LENGTH, GOVERNMENT_TYPES, SECTOR_COMMODITY, SECTOR_TYPES, STAT_MAX, World
 
 ORDER_TYPES = (
     "pass",
@@ -242,7 +242,16 @@ def _resolve_pass(world: World, order: Order) -> None:
 
 def _resolve_build_military(world: World, order: Order) -> None:
     actor = world.get(order.actor_id)
-    spend = min(15.0, actor.economy * 0.2)
+    # Once military is already at (or essentially at) its hard cap,
+    # spending here would buy zero real gain -- clamp_stats silently
+    # discards the overflow after this resolver runs, but the economic
+    # cost would still have been paid for nothing. Charge only for the
+    # military the nation can actually still gain.
+    room = max(0.0, STAT_MAX - actor.military)
+    if room <= 0.0:
+        world.log(f"{actor.name}'s military is already at full strength; the buildup has nowhere to go.")
+        return
+    spend = min(15.0, actor.economy * 0.2, room / 1.2)
     actor.economy -= spend
     actor.military += spend * 1.2
 

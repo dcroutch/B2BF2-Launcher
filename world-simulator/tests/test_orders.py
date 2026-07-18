@@ -160,6 +160,27 @@ class TestResolveOrders(unittest.TestCase):
         self.assertLess(world.get("a").economy, 50)
         self.assertGreater(world.get("a").military, 10)
 
+    def test_build_military_at_full_strength_does_not_waste_economy(self):
+        # Regression test: military is capped at 100, but the resolver
+        # used to spend economy unconditionally regardless of how much
+        # military the nation could actually still gain -- clamp_stats
+        # silently discarded the overflow afterward, so a nation already
+        # at (or essentially at) the cap paid real economic cost for zero
+        # military benefit, turn after turn.
+        world = make_world(a={"economy": 60, "economic_potential": 60, "military": 100})
+        resolve_orders(world, [Order("a", "build_military", None)])
+        self.assertEqual(world.get("a").economy, 60)
+        self.assertEqual(world.get("a").military, 100)
+
+    def test_build_military_near_the_cap_only_charges_for_the_remaining_room(self):
+        world = make_world(a={"economy": 60, "economic_potential": 60, "military": 98})
+        resolve_orders(world, [Order("a", "build_military", None)])
+        self.assertEqual(world.get("a").military, 100)
+        # Only ~2 military worth of spend (2/1.2) should have been
+        # charged, not the full min(15, economy*0.2) it would take if
+        # there were no cap.
+        self.assertGreater(world.get("a").economy, 58)
+
     def test_invest_economy_raises_economic_potential(self):
         world = make_world()
         before = world.get("a").economic_potential
