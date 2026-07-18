@@ -24,6 +24,17 @@ SECTOR_COMMODITY = {
     "services": None,
 }
 
+# Forms of government. "democracy" holds fixed-term elections; "parliamentary"
+# also holds fixed-term elections but can additionally be brought down early
+# by a vote of no confidence; "authoritarian" holds neither -- an unpopular
+# authoritarian regime can only fall through the existing stability-collapse
+# path, not the ballot box.
+GOVERNMENT_TYPES = ("democracy", "parliamentary", "authoritarian")
+ELECTED_GOVERNMENT_TYPES = ("democracy", "parliamentary")
+
+# Turns between scheduled elections for elected governments.
+ELECTION_TERM_LENGTH = 20
+
 STAT_MIN, STAT_MAX = 0, 100
 
 
@@ -65,10 +76,19 @@ class Nation:
     truce_until: dict = field(default_factory=dict)
     is_player: bool = False
     alive: bool = True
+    # Government/elections. "in_power" going False is a distinct end state
+    # from "alive" going False: a nation can lose an election or be brought
+    # down by a no-confidence vote while remaining perfectly stable and
+    # economically intact -- it's a change of leadership, not a collapse.
+    government_type: str = "democracy"
+    election_due_turn: int = None
+    in_power: bool = True
 
     def __post_init__(self):
         if self.economic_potential is None:
             self.economic_potential = self.economy
+        if self.election_due_turn is None:
+            self.election_due_turn = ELECTION_TERM_LENGTH
 
     def relation(self, other_id: str) -> float:
         return self.relations.get(other_id, 0.0)

@@ -42,10 +42,34 @@ VERB_RULES = (
     ("trade_pact", ("trade deal", "trade pact", "trade agreement", "free trade")),
     ("improve_relations", ("improve relations", "diplomacy", "reach out", "extend friendship", "make friends", "apologize")),
     ("build_military", ("build military", "build up the military", "rearm", "mobilize", "increase defense spending", "build army")),
+    (
+        "modify_constitution",
+        (
+            "new constitution", "rewrite the constitution", "constitution",
+            "abolish democracy", "impose authoritarian rule", "declare martial law",
+            "coup", "one-party rule", "seize absolute power", "become a dictatorship",
+            "restore democracy", "restore parliament", "restore parliamentary",
+            "become a democracy", "transition to democracy", "hold free elections",
+        ),
+    ),
     ("invest_sector", ("invest in", "boost", "develop", "fund", "grow the", "subsidize")),
     ("invest_economy", ("invest", "stimulate", "economic stimulus", "grow the economy")),
     ("pass", ("do nothing", "wait", "hold position", "stand down")),
 )
+
+# Maps keywords about a *form of government* to a GOVERNMENT_TYPES value,
+# used only to fill in modify_constitution's detail -- never to look up or
+# change any nation other than the actor (that order has no target_id).
+GOVERNMENT_ALIASES = {
+    "communist": "authoritarian", "communism": "authoritarian",
+    "fascist": "authoritarian", "fascism": "authoritarian",
+    "dictatorship": "authoritarian", "dictator": "authoritarian",
+    "authoritarian": "authoritarian", "one-party": "authoritarian",
+    "one party": "authoritarian", "autocracy": "authoritarian",
+    "martial law": "authoritarian", "junta": "authoritarian",
+    "democracy": "democracy", "democratic": "democracy", "republic": "democracy",
+    "parliament": "parliamentary", "parliamentary": "parliamentary",
+}
 
 SECTOR_ALIASES = {
     "agriculture": "agriculture", "farm": "agriculture", "farming": "agriculture",
@@ -79,6 +103,13 @@ def _find_sector(lowered: str) -> str:
     for alias, sector in SECTOR_ALIASES.items():
         if _find(lowered, alias) != -1:
             return sector
+    return None
+
+
+def _find_government(lowered: str) -> str:
+    for alias, government_type in GOVERNMENT_ALIASES.items():
+        if _find(lowered, alias) != -1:
+            return government_type
     return None
 
 
@@ -125,6 +156,15 @@ def parse_command(world: World, player_id: str, text: str) -> Order:
         sector = _find_sector(lowered)
         if sector is None:
             matched_type = "invest_economy"
+
+    if matched_type == "modify_constitution":
+        government_type = _find_government(lowered)
+        if government_type is None:
+            # Recognized "constitution"/"coup"-flavored language but
+            # couldn't tell which form of government was intended --
+            # resolve as a wildcard rather than guessing.
+            return Order(player_id, "wildcard", target_id=target_id, detail=text)
+        return Order(player_id, "modify_constitution", detail=government_type)
 
     if matched_type is None:
         # No recognized verb at all: highly unusual/chaotic/unrealistic

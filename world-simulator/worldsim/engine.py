@@ -5,12 +5,25 @@ import random
 from typing import Callable, Optional
 
 from .ai import choose_order
-from .models import RESOURCE_TYPES, SECTOR_TYPES, World
+from .models import ELECTION_TERM_LENGTH, RESOURCE_TYPES, SECTOR_TYPES, World
 from .orders import Order, resolve_orders
 
 WAR_STABILITY_DRAIN = 2.0
 WAR_MILITARY_DRAIN = 1.5
 COLLAPSE_STABILITY = 0.0
+
+# A government (elected or not) needs at least this much public approval to
+# survive a scheduled election.
+ELECTION_WIN_OPINION_THRESHOLD = 50.0
+# Parliamentary systems can be brought down between elections by a vote of
+# no confidence, but only under genuinely extreme, sustained displeasure on
+# both fronts -- a single bad turn shouldn't topple a government.
+NO_CONFIDENCE_OPINION_THRESHOLD = 15.0
+NO_CONFIDENCE_STABILITY_THRESHOLD = 25.0
+# A new administration (AI nations only -- the player's game simply ends)
+# takes office with a fresh, moderate approval rating rather than inheriting
+# the outgoing government's unpopularity.
+NEW_ADMINISTRATION_OPINION = 55.0
 
 # (name, resource deltas, stability delta, public_opinion delta)
 MINOR_EVENTS = (
@@ -45,6 +58,7 @@ def run_turn(world: World, player_orders: list[Order], rng: random.Random) -> No
     resolve_orders(world, all_orders)
     _apply_passive_effects(world, rng)
     _update_market_prices(world)
+    _resolve_elections(world)
     _check_collapses(world)
     world.turn += 1
 
@@ -147,6 +161,46 @@ def _update_market_prices(world: World) -> None:
         world.market_prices[r] = current + (target_price - current) * MARKET_PRICE_ADJUST_RATE
 
 
+def _resolve_elections(world: World) -> None:
+    """Governments answer to their own domestic politics, independent of
+    anything the player types about *other* nations (see parser.py's
+    actor-lock guarantee -- nothing here can be triggered or skipped by
+    input text; it runs purely off public_opinion/stability state)."""
+    for nation in world.alive_nations():
+        if nation.government_type == "authoritarian":
+            continue  # no real elections to hold or lose
+        if world.turn >= nation.election_due_turn:
+            _hold_election(world, nation)
+        elif (
+            nation.government_type == "parliamentary"
+            and nation.public_opinion < NO_CONFIDENCE_OPINION_THRESHOLD
+            and nation.stability < NO_CONFIDENCE_STABILITY_THRESHOLD
+        ):
+            world.log(f"{nation.name}'s parliament passes a vote of no confidence, collapsing the government.")
+            _oust_leader(world, nation)
+
+
+def _hold_election(world: World, nation) -> None:
+    if nation.public_opinion >= ELECTION_WIN_OPINION_THRESHOLD:
+        nation.election_due_turn = world.turn + ELECTION_TERM_LENGTH
+        nation.public_opinion = min(100.0, nation.public_opinion + 3.0)
+        world.log(f"{nation.name} holds elections; the incumbent government is re-elected.")
+    else:
+        world.log(f"{nation.name} holds elections; the incumbent government is voted out of office.")
+        _oust_leader(world, nation)
+
+
+def _oust_leader(world: World, nation) -> None:
+    if nation.is_player:
+        # The player's leadership loses power outright -- this is checked
+        # by game_status() as a distinct end state from a stability collapse.
+        nation.in_power = False
+    else:
+        nation.public_opinion = NEW_ADMINISTRATION_OPINION
+        nation.election_due_turn = world.turn + ELECTION_TERM_LENGTH
+        world.log(f"A new administration takes power in {nation.name}.")
+
+
 def _check_collapses(world: World) -> None:
     for nation in world.alive_nations():
         if nation.stability <= COLLAPSE_STABILITY:
@@ -163,6 +217,8 @@ def game_status(world: World, player_id: str, max_turns: int = 100) -> Optional[
     """Return 'win', 'loss', or None if the game should continue."""
     player = world.nations[player_id]
     if not player.alive:
+        return "loss"
+    if not player.in_power:
         return "loss"
     alive = world.alive_nations()
     if world.turn >= max_turns:

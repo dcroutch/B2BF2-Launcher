@@ -33,6 +33,13 @@ def score_order(world: World, order: Order) -> float:
         # Nations naturally shore up whichever sector is weakest.
         return 2.0 + (50 - actor.sectors.get(order.detail, 40)) * 0.05
 
+    if order.type == "modify_constitution":
+        # AI nations essentially never stage a coup or rewrite their own
+        # constitution on a whim -- this keeps the order reachable (and
+        # player-driven regime change fully supported) without every AI
+        # nation randomly flipping governments turn to turn.
+        return -50
+
     if order.type == "improve_relations":
         # The worse relations are, the more there is to gain from fixing
         # them -- real reconciliation does happen eventually, so this never

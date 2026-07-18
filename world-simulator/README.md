@@ -70,6 +70,25 @@ deterministic scoring rules (`worldsim/ai.py`), seeded for reproducible runs.
   price is a shared, world-wide supply/demand index — a nation with a
   surplus of a scarce commodity benefits as an exporter; a nation short on
   it suffers as an importer. Everyone trades in the same market.
+- **Government and elections** (`Nation.government_type`): every nation is a
+  `democracy`, `parliamentary` system, or `authoritarian` regime.
+  Democracies and parliamentary systems hold a scheduled election every 20
+  turns — **lose one as the player and the game ends**; win and you're
+  re-elected. Parliamentary systems can additionally fall early to a *vote
+  of no confidence* under sustained extreme unpopularity (low approval
+  *and* low stability at once) — authoritarian regimes hold neither and can
+  only fall through an ordinary stability collapse. `modify_constitution`
+  (e.g. "seize absolute power and establish a dictatorship", "restore
+  parliamentary democracy") changes your *own* nation's government —
+  abolishing an elected government for authoritarian rule costs a large
+  public-opinion/stability hit and visibly alarms every other democracy in
+  the world. **This order has no target — it is structurally impossible for
+  it to change any nation's government but the actor's own.** A statement
+  asserting an outcome for a *different* nation ("With a vote of 85%,
+  Canada instituted a communist constitution") is never taken as fact; it's
+  downgraded to the same rhetorical wildcard as any other impersonation
+  attempt, and Canada's government is untouched — see
+  `tests/test_government.py::TestParserCannotDictateOtherNationsGovernment`.
 
 ## Run tests
 

@@ -220,6 +220,61 @@ extracts the target. Two properties matter more than parsing accuracy:
   Argentina lead food, ...) so nations start economically differentiated,
   not just militarily/diplomatically.
 
+## Government, elections, and checks and balances
+
+- **Three government types** (`Nation.government_type`): `democracy`
+  (fixed-term, presidential-style — can only be removed at a scheduled
+  election), `parliamentary` (fixed-term elections *plus* an early-removal
+  check-and-balance), `authoritarian` (no real elections at all).
+- **Scheduled elections** (`engine._resolve_elections` / `_hold_election`):
+  every elected government faces an election on `election_due_turn` (every
+  `ELECTION_TERM_LENGTH` = 20 turns). The outcome is fully legible to the
+  player: win if `public_opinion >= 50` at that moment, lose otherwise --
+  no hidden randomness. For the player, losing sets `in_power = False`,
+  which `game_status` treats as a loss condition distinct from the
+  stability-collapse path (a nation can lose an election while perfectly
+  stable and prosperous). For AI nations, a loss just installs a new
+  administration with a reset approval rating and keeps the nation in play
+  -- governments turn over in the background all game, not just the
+  player's.
+- **Parliamentary no-confidence** (`_resolve_elections`'s `elif` branch):
+  only `parliamentary` systems can fall *between* elections, and only under
+  genuinely extreme, simultaneous distress (`public_opinion < 15` and
+  `stability < 25`) -- this is the "checks and balances remove the ruling
+  power under extreme displeasure" mechanic, deliberately scoped tighter
+  than a scheduled election loss so it can't be triggered by one bad turn.
+  A `democracy` (presidential system) has no equivalent early-removal path
+  by design -- modeling impeachment realistically was out of scope, so a
+  presidential government simply serves out its term.
+- **`modify_constitution`** (self-only order, no `target_id` at all --
+  see below) lets a government change its own type: abolishing an elected
+  government for `authoritarian` rule is modeled as a coup (large
+  opinion/stability hit, every other elected government's relations toward
+  the actor cool -- reusing `_shift_relations`, not a new reaction
+  channel); adopting an elected constitution schedules a fresh election
+  term; a reform between `democracy` and `parliamentary` is minor.
+
+### The player cannot dictate outcomes for another nation by asserting them
+
+This generalizes the actor-lock guarantee from free text
+("declare war") to free text asserting *facts*
+("with a vote of 85%, Canada instituted a communist constitution"). Two
+things make this safe by construction, not by pattern-matching harder:
+
+1. `modify_constitution` has no `target_id` -- there is no code path,
+   parser bug, or malformed input that can make it change any nation's
+   government except the actor's own, because the concept of "a different
+   target" doesn't exist for this order type.
+2. The parser's existing impersonation guard (a different nation named
+   before any recognized verb -> downgrade to `wildcard`) already covers
+   declarative "fact" statements about other nations, since it fires on
+   *any* verb match, including `modify_constitution`'s. "Canada instituted
+   a communist constitution" names Canada before the constitution-flavored
+   keywords, so it becomes a wildcard rhetorical statement toward Canada
+   (logged, sentiment-scored, relation-shifting) -- never an actual change
+   to Canada's `government_type`. See
+   `tests/test_government.py::TestParserCannotDictateOtherNationsGovernment`.
+
 ## Testing strategy
 
 Unit tests per module (models validity, each order's resolution effect in

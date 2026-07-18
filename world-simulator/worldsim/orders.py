@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from .models import SECTOR_COMMODITY, SECTOR_TYPES, World
+from .models import ELECTION_TERM_LENGTH, GOVERNMENT_TYPES, SECTOR_COMMODITY, SECTOR_TYPES, World
 
 ORDER_TYPES = (
     "pass",
@@ -22,6 +22,10 @@ ORDER_TYPES = (
     "impose_embargo",
     "declare_war",
     "sue_for_peace",
+    # Self-only, like invest_sector: no other nation can ever be the target
+    # of this order, so no input text can change *another* nation's form of
+    # government -- only the actor's own.
+    "modify_constitution",
     # A catch-all for erratic, chaotic, or otherwise unmodeled player intent
     # (see worldsim/parser.py) -- still resolves deterministically, just
     # through a sentiment-scored generic gesture instead of a fixed effect.
@@ -40,6 +44,7 @@ PRIORITY = {
     "invest_economy": 1,
     "invest_sector": 1,
     "build_military": 1,
+    "modify_constitution": 1,
     "declare_war": 2,
     "pass": 3,
 }
@@ -50,8 +55,9 @@ class Order:
     actor_id: str
     type: str
     target_id: Optional[str] = None
-    # Free-form extra parameter: sector name for invest_sector, raw player
-    # text for wildcard. Unused by every other order type.
+    # Free-form extra parameter: sector name for invest_sector, new
+    # government type for modify_constitution, raw player text for
+    # wildcard. Unused by every other order type.
     detail: Optional[str] = None
 
     def __post_init__(self):
@@ -63,6 +69,8 @@ class Order:
             raise ValueError(f"Order {self.type} cannot target its own actor")
         if self.type == "invest_sector" and self.detail not in SECTOR_TYPES:
             raise ValueError(f"invest_sector requires detail to be one of {SECTOR_TYPES}")
+        if self.type == "modify_constitution" and self.detail not in GOVERNMENT_TYPES:
+            raise ValueError(f"modify_constitution requires detail to be one of {GOVERNMENT_TYPES}")
 
 
 TARGETED_ORDERS = {
@@ -103,6 +111,9 @@ def legal_orders(world: World, actor_id: str):
     yield Order(actor_id, "invest_economy")
     for sector in SECTOR_TYPES:
         yield Order(actor_id, "invest_sector", detail=sector)
+    for government_type in GOVERNMENT_TYPES:
+        if government_type != actor.government_type:
+            yield Order(actor_id, "modify_constitution", detail=government_type)
     for other in world.alive_nations():
         if other.id == actor_id:
             continue
@@ -225,6 +236,56 @@ def _resolve_invest_sector(world: World, order: Order) -> None:
         actor.resources[commodity] = actor.resources.get(commodity, 0.0) + 5
     sector_label = sector.replace("_sector", "").replace("_", " ")
     world.log(f"{actor.name} invests in its {sector_label} sector.")
+
+
+CONSTITUTION_COUP_OPINION_HIT = -25
+CONSTITUTION_COUP_STABILITY_HIT = -15
+CONSTITUTION_COUP_RELATION_HIT = -12
+CONSTITUTION_LIBERALIZATION_OPINION_BOOST = 15
+CONSTITUTION_TRANSITION_STABILITY_HIT = -5
+CONSTITUTION_REFORM_OPINION_DELTA = 3
+
+
+def _resolve_modify_constitution(world: World, order: Order) -> None:
+    """Change the actor's own government type -- this order has no
+    target_id at all, so no player input can ever change *another*
+    nation's constitution, only their own (see worldsim/parser.py)."""
+    actor = world.get(order.actor_id)
+    old_type = actor.government_type
+    new_type = order.detail
+    if new_type == old_type:
+        world.log(f"{actor.name} reaffirms its existing {old_type} constitution.")
+        return
+
+    was_elected = old_type in ("democracy", "parliamentary")
+    becomes_elected = new_type in ("democracy", "parliamentary")
+
+    if was_elected and not becomes_elected:
+        # A coup: abolishing elected government for authoritarian rule.
+        actor.public_opinion += CONSTITUTION_COUP_OPINION_HIT
+        actor.stability += CONSTITUTION_COUP_STABILITY_HIT
+        world.log(f"{actor.name} abolishes its {old_type} constitution and imposes {new_type} rule.")
+        condemners = 0
+        for other in world.alive_nations():
+            if other.id == actor.id:
+                continue
+            if other.government_type in ("democracy", "parliamentary"):
+                _shift_relations(other, actor, CONSTITUTION_COUP_RELATION_HIT)
+                condemners += 1
+        if condemners:
+            world.log(f"The world's democracies condemn {actor.name}'s power grab.")
+    elif not was_elected and becomes_elected:
+        # Democratization: elections are scheduled for the new term.
+        actor.public_opinion += CONSTITUTION_LIBERALIZATION_OPINION_BOOST
+        actor.stability += CONSTITUTION_TRANSITION_STABILITY_HIT
+        actor.election_due_turn = world.turn + ELECTION_TERM_LENGTH
+        world.log(f"{actor.name} adopts a {new_type} constitution and schedules elections.")
+    else:
+        # A reform between two elected systems (democracy <-> parliamentary).
+        actor.public_opinion += CONSTITUTION_REFORM_OPINION_DELTA
+        world.log(f"{actor.name} reforms its constitution from {old_type} to {new_type}.")
+
+    actor.government_type = new_type
 
 
 def _resolve_improve_relations(world: World, order: Order) -> None:
@@ -390,6 +451,7 @@ RESOLVERS = {
     "build_military": _resolve_build_military,
     "invest_economy": _resolve_invest_economy,
     "invest_sector": _resolve_invest_sector,
+    "modify_constitution": _resolve_modify_constitution,
     "improve_relations": _resolve_improve_relations,
     "propose_alliance": _resolve_propose_alliance,
     "break_alliance": _resolve_break_alliance,

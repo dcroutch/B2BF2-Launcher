@@ -18,11 +18,14 @@ MAX_TURNS = 100
 
 def print_status(world: World, player_id: str) -> None:
     p = world.get(player_id)
-    print(f"\n=== Turn {world.turn} — {p.name} ===")
+    print(f"\n=== Turn {world.turn} — {p.name} ({p.government_type}) ===")
     print(
         f"Stability {p.stability:.0f} | Military {p.military:.0f} | "
         f"Economy {p.economy:.0f} | Public opinion {p.public_opinion:.0f}"
     )
+    if p.government_type != "authoritarian":
+        turns_to_election = p.election_due_turn - world.turn
+        print(f"Next election in {max(turns_to_election, 0)} turn(s) (win threshold: 50 approval)")
     print(f"Sectors: {{{', '.join(f'{k}: {v:.0f}' for k, v in p.sectors.items())}}}")
     print(f"Resources: {{{', '.join(f'{k}: {v:.0f}' for k, v in p.resources.items())}}}")
     if p.alliances:
