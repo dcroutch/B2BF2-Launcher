@@ -103,14 +103,6 @@ function alive_nations(array $world): array {
     return array_values(array_filter($world['nations'], fn($n) => $n['alive']));
 }
 
-function w_get(array &$world, string $id): array {
-    return $world['nations'][$id];
-}
-
-function w_set(array &$world, array $n): void {
-    $world['nations'][$n['id']] = $n;
-}
-
 function w_log(array &$world, string $message): void {
     $world['event_log'][] = "[T{$world['turn']}] {$message}";
 }

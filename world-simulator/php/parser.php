@@ -148,8 +148,12 @@ function parse_command(array $world, string $playerId, string $text): array {
     // player, mentioned before any recognized verb -- can never become a
     // real order for that nation; downgrade to a wildcard about it.
     if ($earliestId !== null && $earliestId !== $playerId && ($verbPos === null || $earliestPos < $verbPos)) {
-        $wildcardTarget = ($targetId !== null && $targetId !== $earliestId) ? $targetId : $earliestId;
-        return make_order($playerId, 'wildcard', $wildcardTarget, $text);
+        // $earliestId is already guaranteed to be the same nation $targetId
+        // holds here: $targetId tracks the earliest non-player mention, and
+        // $earliestId (non-player, per the condition above) is by
+        // definition the earliest mention overall -- so it's always also
+        // the earliest non-player one.
+        return make_order($playerId, 'wildcard', $earliestId, $text);
     }
 
     if ($matchedType === 'invest_sector') {

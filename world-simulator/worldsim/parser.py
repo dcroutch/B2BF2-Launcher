@@ -200,8 +200,12 @@ def parse_command(world: World, player_id: str, text: str) -> Order:
     # declare_war/embargo/etc. -- it's downgraded to the player making a
     # (rhetorical, wildcard) statement about that nation instead.
     if earliest_id is not None and earliest_id != player_id and (verb_pos is None or earliest_pos < verb_pos):
-        wildcard_target = target_id if target_id != earliest_id else earliest_id
-        return Order(player_id, "wildcard", target_id=wildcard_target, detail=text)
+        # earliest_id is already guaranteed to be the same nation target_id
+        # holds here: target_id tracks the earliest non-player mention, and
+        # earliest_id (non-player, per the condition above) is by
+        # definition the earliest mention overall -- so it's always also
+        # the earliest non-player one.
+        return Order(player_id, "wildcard", target_id=earliest_id, detail=text)
 
     if matched_type == "invest_sector":
         sector = _find_sector(lowered)
