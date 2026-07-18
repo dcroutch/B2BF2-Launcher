@@ -4,6 +4,7 @@ is parsed by worldsim.parser's fixed keyword rules -- not a language model."""
 from __future__ import annotations
 
 import random
+import secrets
 from typing import Optional
 
 from .engine import game_status, run_turn
@@ -89,7 +90,12 @@ def main() -> None:
     while player_id not in VALID_NATION_IDS:
         print(f"Unknown nation '{player_id}'. Choose from: {', '.join(list_nation_ids())}")
         player_id = input("Choose your nation [usa]: ").strip() or "usa"
-    seed = 42
+    # A fresh random seed per session -- a hardcoded seed here would make
+    # every replay of "the same" opening moves produce bit-for-bit
+    # identical AI behavior and minor events, effectively handing players
+    # one memorizable optimal script instead of a world that responds to
+    # their choices plus genuine randomness.
+    seed = secrets.randbelow(1_000_000)
     world = default_world(player_id=player_id, seed=seed)
     rng = random.Random(seed)
 

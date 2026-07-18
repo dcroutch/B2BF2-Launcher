@@ -106,9 +106,53 @@ and a global `event_log`.
    stability drifts toward a target based on war exhaustion / prosperity,
    wars inflict military and stability losses on both sides each turn a war
    persists, embargoes drain the target's economy.
-5. Random minor events (seeded) can nudge stability/resources (drought,
-   discovery, unrest) — small, bounded, always logged.
+5. Random minor events (seeded, magnitude-randomized within a range —
+   see "Minor events" below) can nudge stability/resources (drought,
+   discovery, unrest) — small, bounded, always logged. Unrest-flavored
+   events (civil unrest, corruption scandal) are only ever eligible for a
+   nation whose own stability or public opinion has already degraded
+   below a threshold; a stable, well-governed nation cannot draw one.
 6. Win/lose/continue check; log turn summary; increment turn counter.
+
+## Minor events: not fixed, gated by domestic state, not predictable
+
+`engine._maybe_trigger_minor_event` replaced an earlier flat design (a
+fixed 8% chance, then `random.choice` over one flat tuple of 8 events
+with hardcoded deltas) that had two problems: (1) civil unrest and
+corruption scandal could hit *any* nation regardless of how well it was
+actually governed, including one at 90 stability/90 opinion, which reads
+as arbitrary rather than a consequence of anything; (2) every occurrence
+of "the same" event applied an identical, hardcoded delta, so a min-maxing
+player replaying the same opening moves with the same seed would see
+bit-for-bit identical outcomes forever.
+
+Now:
+- **Unrest gating**: `UNREST_EVENTS` (civil_unrest, corruption_scandal)
+  only enter the roll's pool when `nation.stability < UNREST_STABILITY_THRESHOLD`
+  (40) or `nation.public_opinion < UNREST_OPINION_THRESHOLD` (40) --
+  i.e. the nation is already, demonstrably struggling as a result of
+  whatever choices (player or AI) got it there. `POSITIVE_EVENTS` and the
+  weather/supply-shock `NEUTRAL_EVENTS` (drought) remain available to
+  everyone, since a drought isn't a verdict on governance quality the way
+  unrest is.
+- **State-responsive chance, not a flat coin flip**: the overall chance of
+  *any* event this turn is `BASE_EVENT_CHANCE` (6%), bumped by
+  `STRUGGLING_EVENT_CHANCE_BONUS` (+5%) when the nation is already
+  struggling -- more is happening to a nation in domestic trouble, not
+  just worse things when something does happen.
+- **Randomized magnitude**: every event's stability/opinion/resource
+  deltas are now `(lo, hi)` ranges sampled via `rng.uniform(...)`, not
+  fixed constants -- no two occurrences of "the same" event play out
+  identically, even across an otherwise-identical replay.
+
+This resolution mechanism is still fully deterministic given a seed +
+identical actions (a hard requirement for testability), but the *seed
+itself* is no longer fixed in either front end: `cli.py` used to
+hardcode `seed = 42`, meaning literally every terminal session with the
+same opening moves saw the exact same AI behavior and events forever --
+a memorizable, forced-optimal script rather than a world that responds to
+choices plus genuine randomness. It now draws a fresh seed
+(`secrets.randbelow`) per session, matching what `web.py` already did.
 
 ## Orders (the fixed action menu — replaces free-text)
 

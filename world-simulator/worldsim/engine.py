@@ -25,17 +25,41 @@ NO_CONFIDENCE_STABILITY_THRESHOLD = 25.0
 # the outgoing government's unpopularity.
 NEW_ADMINISTRATION_OPINION = 55.0
 
-# (name, resource deltas, stability delta, public_opinion delta)
-MINOR_EVENTS = (
-    ("drought", {"food": -10}, -3, -2),
-    ("bumper_harvest", {"food": 10}, 2, 2),
-    ("oil_discovery", {"oil": 15}, 1, 3),
-    ("rare_metals_strike", {"metals": 12}, 1, 2),
-    ("tech_breakthrough", {"tech_components": 12}, 1, 3),
-    ("civil_unrest", {}, -6, -8),
-    ("cultural_festival", {}, 3, 4),
-    ("corruption_scandal", {}, -2, -7),
+# Minor events are not a flat, context-free coin flip: their magnitude is
+# randomized within a range (so the "same" event never plays out
+# identically twice, even in an otherwise-identical replay), and unrest-
+# flavored events are only ever *eligible* when the nation's own domestic
+# stats -- the product of the choices that got it there -- have already
+# degraded. A stable, well-governed nation cannot randomly suffer civil
+# unrest or a corruption scandal; it has to actually be struggling first.
+#
+# (name, resource-delta ranges, stability-delta range, opinion-delta range)
+POSITIVE_EVENTS = (
+    ("bumper_harvest", {"food": (5.0, 15.0)}, (1.0, 4.0), (1.0, 4.0)),
+    ("oil_discovery", {"oil": (8.0, 20.0)}, (0.0, 2.0), (1.0, 4.0)),
+    ("rare_metals_strike", {"metals": (6.0, 16.0)}, (0.0, 2.0), (1.0, 3.0)),
+    ("tech_breakthrough", {"tech_components": (6.0, 16.0)}, (0.0, 2.0), (1.0, 4.0)),
+    ("cultural_festival", {}, (1.0, 4.0), (2.0, 5.0)),
 )
+# A weather/supply shock that can strike any nation regardless of how well
+# it's governed -- unlike civil unrest, this isn't a verdict on domestic
+# management.
+NEUTRAL_EVENTS = (
+    ("drought", {"food": (-15.0, -5.0)}, (-4.0, -1.0), (-3.0, -1.0)),
+)
+# Only rolled when the nation is already domestically struggling (see
+# UNREST_STABILITY_THRESHOLD / UNREST_OPINION_THRESHOLD below).
+UNREST_EVENTS = (
+    ("civil_unrest", {}, (-9.0, -4.0), (-11.0, -5.0)),
+    ("corruption_scandal", {}, (-4.0, -1.0), (-10.0, -4.0)),
+)
+
+BASE_EVENT_CHANCE = 0.06
+# A nation already in domestic trouble is more turbulent generally, not
+# just eligible for worse outcomes -- more is happening, good or bad.
+STRUGGLING_EVENT_CHANCE_BONUS = 0.05
+UNREST_STABILITY_THRESHOLD = 40.0
+UNREST_OPINION_THRESHOLD = 40.0
 
 # Global commodity market tuning.
 MARKET_PRICE_ADJUST_RATE = 0.1
@@ -144,17 +168,34 @@ def _apply_passive_effects(world: World, rng: random.Random) -> None:
         for r in nation.resources:
             nation.resources[r] += 1.0
 
-        # A small seeded chance of a minor event.
-        if rng.random() < 0.08:
-            name, resource_deltas, stability_delta, opinion_delta = rng.choice(MINOR_EVENTS)
-            nation.stability += stability_delta
-            nation.public_opinion += opinion_delta
-            for r, d in resource_deltas.items():
-                nation.resources[r] = nation.resources.get(r, 0) + d
-            world.log(f"{nation.name} experiences {name.replace('_', ' ')}.")
+        _maybe_trigger_minor_event(world, nation, rng)
 
         nation.clamp_stats()
         _maybe_trigger_civil_war(world, nation, rng)
+
+
+def _maybe_trigger_minor_event(world: World, nation, rng: random.Random) -> None:
+    """Roll for a minor event. Whether the nation is even eligible for
+    unrest-flavored outcomes -- and how likely an event is at all -- both
+    depend on its current domestic stats, which are themselves a product
+    of the choices (player or AI) that led here. Magnitudes are sampled
+    from a range rather than fixed, so no two occurrences of "the same"
+    event play out identically."""
+    struggling = nation.stability < UNREST_STABILITY_THRESHOLD or nation.public_opinion < UNREST_OPINION_THRESHOLD
+    chance = BASE_EVENT_CHANCE + (STRUGGLING_EVENT_CHANCE_BONUS if struggling else 0.0)
+    if rng.random() >= chance:
+        return
+
+    pool = list(POSITIVE_EVENTS) + list(NEUTRAL_EVENTS)
+    if struggling:
+        pool += list(UNREST_EVENTS)
+    name, resource_ranges, stability_range, opinion_range = rng.choice(pool)
+
+    nation.stability += rng.uniform(*stability_range)
+    nation.public_opinion += rng.uniform(*opinion_range)
+    for r, (lo, hi) in resource_ranges.items():
+        nation.resources[r] = nation.resources.get(r, 0.0) + rng.uniform(lo, hi)
+    world.log(f"{nation.name} experiences {name.replace('_', ' ')}.")
 
 
 def _maybe_trigger_civil_war(world: World, nation, rng: random.Random) -> None:
