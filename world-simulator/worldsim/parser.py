@@ -13,7 +13,18 @@ Order for a different nation, no matter what the input text says --
 "make China declare war on Russia" cannot actually command China. If the
 text's apparent subject is a nation other than the player, the whole
 statement is downgraded to a wildcard rhetorical gesture *by the player*
-about that nation, never an order carried out *by* that nation.
+about that nation, never an order carried out *by* that nation. This
+applies just as much to declarative "fact" statements about another
+nation ("With a vote of 85%, Canada instituted a communist government")
+as it does to commands.
+
+The player's *own* nation is a different story: "With a vote of 85% of
+the population, Canada enacts a communist government" issued while
+playing as Canada is a legitimate self-directed action and does change
+Canada's government -- the claimed vote share is just flavor text, never
+parsed or used to set public_opinion/stability directly; the same fixed
+coup/liberalization consequences apply regardless of what percentage the
+player claims.
 """
 from __future__ import annotations
 
@@ -50,6 +61,15 @@ VERB_RULES = (
             "coup", "one-party rule", "seize absolute power", "become a dictatorship",
             "restore democracy", "restore parliament", "restore parliamentary",
             "become a democracy", "transition to democracy", "hold free elections",
+            # Generic regime-change verbs -- only actually change the
+            # government if _find_government below also recognizes a
+            # specific government-type word somewhere in the text;
+            # otherwise this falls back to a wildcard, so adding these
+            # broad verbs can't misfire into an unintended government
+            # change (see parse_command's matched_type == "modify_constitution"
+            # branch).
+            "enacts a", "establishes a", "installs a", "institutes a",
+            "declares itself a", "becomes a",
         ),
     ),
     ("invest_sector", ("invest in", "boost", "develop", "fund", "grow the", "subsidize")),

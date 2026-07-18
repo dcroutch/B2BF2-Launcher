@@ -87,8 +87,14 @@ deterministic scoring rules (`worldsim/ai.py`), seeded for reproducible runs.
   asserting an outcome for a *different* nation ("With a vote of 85%,
   Canada instituted a communist constitution") is never taken as fact; it's
   downgraded to the same rhetorical wildcard as any other impersonation
-  attempt, and Canada's government is untouched — see
-  `tests/test_government.py::TestParserCannotDictateOtherNationsGovernment`.
+  attempt, and Canada's government is untouched. The exact same "X% of the
+  population voted..." framing *does* still work as a real order when you
+  are playing as that nation — only the claimed vote share is ignored (it's
+  never parsed into `public_opinion` or used to skip the normal coup
+  penalty); the underlying government change and its domestic/international
+  reactions apply exactly as if you'd said it plainly — see
+  `tests/test_government.py::TestParserCannotDictateOtherNationsGovernment`
+  and `::TestSelfDirectedRegimeChangeWithPopulationFraming`.
 
 ## Run tests
 

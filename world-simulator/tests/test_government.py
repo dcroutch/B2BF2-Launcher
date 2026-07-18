@@ -156,5 +156,68 @@ class TestParserCannotDictateOtherNationsGovernment(unittest.TestCase):
         self.assertEqual(world.get("uk").government_type, uk_before)
 
 
+class TestSelfDirectedRegimeChangeWithPopulationFraming(unittest.TestCase):
+    """The refined request: the exact same 'X% of the population voted'
+    framing must still be enacted for real when X *is* the player's own
+    nation -- only the claimed vote share is ignored, not the action
+    itself -- while it stays blocked for every other nation."""
+
+    def test_player_as_canada_enacting_communism_with_population_framing_really_changes_canada(self):
+        world = default_world(player_id="canada")
+        order = parse_command(
+            world, "canada",
+            "With a vote of 85% of the population, Canada enacts a communist government.",
+        )
+        self.assertEqual(order.actor_id, "canada")
+        self.assertEqual(order.type, "modify_constitution")
+        self.assertEqual(order.detail, "authoritarian")
+
+    def test_the_claimed_vote_percentage_does_not_get_parsed_into_public_opinion(self):
+        world = default_world(player_id="canada")
+        order = parse_command(
+            world, "canada",
+            "With a vote of 85% of the population, Canada enacts a communist government.",
+        )
+        run_turn(world, [order], random.Random(2))
+        canada = world.get("canada")
+        # Public opinion should reflect the fixed coup penalty, not 85.
+        self.assertLess(canada.public_opinion, 85)
+        self.assertEqual(canada.government_type, "authoritarian")
+
+    def test_domestic_and_international_reactions_fire_for_the_real_change(self):
+        world = default_world(player_id="canada")
+        canada = world.get("canada")
+        opinion_before, stability_before = canada.public_opinion, canada.stability
+        # Pick a nation still elected at this point to confirm it reacts.
+        democracy_id = next(
+            n.id for n in world.alive_nations()
+            if n.government_type in ("democracy", "parliamentary") and n.id != "canada"
+        )
+        relation_before = world.get(democracy_id).relation("canada")
+
+        order = parse_command(
+            world, "canada",
+            "With a vote of 85% of the population, Canada enacts a communist government.",
+        )
+        run_turn(world, [order], random.Random(3))
+
+        self.assertLess(world.get("canada").public_opinion, opinion_before)  # domestic reaction
+        self.assertLess(world.get("canada").stability, stability_before)
+        self.assertLess(world.get(democracy_id).relation("canada"), relation_before)  # international reaction
+        self.assertTrue(any("power grab" in line or "condemn" in line for line in world.event_log))
+
+    def test_same_statement_still_blocked_when_someone_else_plays_the_game(self):
+        world = default_world(player_id="usa")
+        canada_before = world.get("canada").government_type
+        order = parse_command(
+            world, "usa",
+            "With a vote of 85% of the population, Canada enacts a communist government.",
+        )
+        self.assertEqual(order.actor_id, "usa")
+        self.assertEqual(order.type, "wildcard")
+        run_turn(world, [order], random.Random(1))
+        self.assertEqual(world.get("canada").government_type, canada_before)
+
+
 if __name__ == "__main__":
     unittest.main()

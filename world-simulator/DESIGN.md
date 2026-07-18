@@ -275,6 +275,19 @@ things make this safe by construction, not by pattern-matching harder:
    to Canada's `government_type`. See
    `tests/test_government.py::TestParserCannotDictateOtherNationsGovernment`.
 
+Crucially, the guard keys off *which nation is named*, not *whether a
+nation is named at all*: `earliest_id != player_id` is the actual
+condition. So "With a vote of 85% of the population, Canada enacts a
+communist government" while playing as Canada does **not** trigger the
+guard (`earliest_id == player_id`) and resolves to a real
+`modify_constitution` order -- the claimed 85% is just flavor text in
+`Order.detail`'s raw string, never parsed into a number or used anywhere;
+the fixed coup penalty and reactions apply exactly as if the player had
+said "we impose authoritarian rule." The same sentence with a *different*
+nation playing still gets blocked, since then `earliest_id` (Canada) does
+differ from `player_id`. See
+`TestSelfDirectedRegimeChangeWithPopulationFraming` in the same file.
+
 ## Testing strategy
 
 Unit tests per module (models validity, each order's resolution effect in
