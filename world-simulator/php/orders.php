@@ -1,0 +1,489 @@
+<?php
+require_once __DIR__ . '/models.php';
+
+const ORDER_TYPES = [
+    'pass', 'build_military', 'invest_economy', 'invest_sector',
+    'improve_relations', 'propose_alliance', 'break_alliance', 'trade_pact',
+    'impose_embargo', 'declare_war', 'sue_for_peace', 'annex',
+    'propose_accession', 'modify_constitution', 'wildcard',
+];
+
+const TARGETED_ORDERS = [
+    'improve_relations', 'propose_alliance', 'break_alliance', 'trade_pact',
+    'impose_embargo', 'declare_war', 'sue_for_peace', 'annex', 'propose_accession',
+];
+
+const ORDER_PRIORITY = [
+    'improve_relations' => 0, 'propose_alliance' => 0, 'break_alliance' => 0,
+    'trade_pact' => 0, 'impose_embargo' => 0, 'sue_for_peace' => 0,
+    'propose_accession' => 0, 'wildcard' => 0,
+    'invest_economy' => 1, 'invest_sector' => 1, 'build_military' => 1,
+    'modify_constitution' => 1,
+    'declare_war' => 2, 'annex' => 2,
+    'pass' => 3,
+];
+
+function make_order(string $actorId, string $type, ?string $targetId = null, ?string $detail = null): array {
+    if (!in_array($type, ORDER_TYPES, true)) {
+        throw new InvalidArgumentException("Unknown order type: $type");
+    }
+    if (in_array($type, TARGETED_ORDERS, true) && !$targetId) {
+        throw new InvalidArgumentException("Order $type requires a target_id");
+    }
+    if ($targetId !== null && $targetId === $actorId) {
+        throw new InvalidArgumentException("Order $type cannot target its own actor");
+    }
+    if ($type === 'invest_sector' && !in_array($detail, SECTOR_TYPES, true)) {
+        throw new InvalidArgumentException('invest_sector requires a valid sector detail');
+    }
+    if ($type === 'modify_constitution' && !in_array($detail, GOVERNMENT_TYPES, true)) {
+        throw new InvalidArgumentException('modify_constitution requires a valid government_type detail');
+    }
+    return ['actor_id' => $actorId, 'type' => $type, 'target_id' => $targetId, 'detail' => $detail];
+}
+
+const ALLIANCE_RELATION_THRESHOLD = 40.0;
+const WAR_RELATION_HIT = -60.0;
+const EMBARGO_RELATION_HIT = -20.0;
+const BREAK_ALLIANCE_RELATION_HIT = -15.0;
+const TRUCE_DURATION = 5;
+
+const WAR_OPINION_HIT_JUSTIFIED = -3.0;
+const WAR_OPINION_HIT_UNPROVOKED = -10.0;
+const RALLY_AROUND_FLAG_OPINION_BOOST = 6.0;
+const EMBARGO_RECEIVED_OPINION_HIT = -4.0;
+const ALLIANCE_OPINION_BOOST = 3.0;
+const PEACE_HUMILIATION_OPINION_HIT = -6.0;
+const PEACE_RELIEF_OPINION_BOOST = 2.0;
+
+const ANNEX_MILITARY_FLOOR = 15.0;
+const ANNEX_DOMINANCE_RATIO = 3.0;
+const ANNEX_MIN_ACTOR_MILITARY = 15.0;
+const ACCESSION_RELATION_THRESHOLD = 70.0;
+
+const ANNEX_ECONOMY_TRANSFER = 0.5;
+const ANNEX_MILITARY_TRANSFER = 0.3;
+const ANNEX_RESOURCE_TRANSFER = 0.5;
+const ANNEX_STABILITY_HIT = -10.0;
+const ANNEX_OPINION_HIT = -5.0;
+const ANNEX_RIVAL_RELATION_HIT = -15.0;
+
+const ACCESSION_ECONOMY_TRANSFER = 0.8;
+const ACCESSION_MILITARY_TRANSFER = 0.8;
+const ACCESSION_RESOURCE_TRANSFER = 0.8;
+const ACCESSION_OPINION_BOOST = 5.0;
+
+const CONSTITUTION_COUP_OPINION_HIT = -25.0;
+const CONSTITUTION_COUP_STABILITY_HIT = -15.0;
+const CONSTITUTION_COUP_RELATION_HIT = -12.0;
+const CONSTITUTION_LIBERALIZATION_OPINION_BOOST = 15.0;
+const CONSTITUTION_TRANSITION_STABILITY_HIT = -5.0;
+const CONSTITUTION_REFORM_OPINION_DELTA = 3.0;
+
+function is_annex_eligible(array $actor, array $target): bool {
+    if ($actor['military'] < ANNEX_MIN_ACTOR_MILITARY) return false;
+    return $target['military'] < ANNEX_MILITARY_FLOOR || $actor['military'] > $target['military'] * ANNEX_DOMINANCE_RATIO;
+}
+
+function legal_orders(array $world, string $actorId): array {
+    $actor = $world['nations'][$actorId];
+    $orders = [];
+    $orders[] = make_order($actorId, 'pass');
+    $orders[] = make_order($actorId, 'build_military');
+    $orders[] = make_order($actorId, 'invest_economy');
+    foreach (SECTOR_TYPES as $sector) {
+        $orders[] = make_order($actorId, 'invest_sector', null, $sector);
+    }
+    foreach (GOVERNMENT_TYPES as $gt) {
+        if ($gt !== $actor['government_type']) {
+            $orders[] = make_order($actorId, 'modify_constitution', null, $gt);
+        }
+    }
+    foreach (alive_nations($world) as $other) {
+        if ($other['id'] === $actorId) continue;
+        $orders[] = make_order($actorId, 'improve_relations', $other['id']);
+        if (!set_has($actor['at_war_with'], $other['id'])) {
+            $mutual = min(nation_relation($actor, $other['id']), nation_relation($other, $actorId));
+            if (!set_has($actor['alliances'], $other['id']) && $mutual >= ALLIANCE_RELATION_THRESHOLD) {
+                $orders[] = make_order($actorId, 'propose_alliance', $other['id']);
+            }
+            if (set_has($actor['alliances'], $other['id'])) {
+                $orders[] = make_order($actorId, 'break_alliance', $other['id']);
+            }
+            if (!set_has($actor['trade_pacts'], $other['id']) && $mutual >= 0) {
+                $orders[] = make_order($actorId, 'trade_pact', $other['id']);
+            }
+            if (!set_has($actor['embargoes_against'], $other['id'])) {
+                $orders[] = make_order($actorId, 'impose_embargo', $other['id']);
+            }
+            if ($world['turn'] >= ($actor['truce_until'][$other['id']] ?? -1)) {
+                $orders[] = make_order($actorId, 'declare_war', $other['id']);
+            }
+            if ($mutual >= ACCESSION_RELATION_THRESHOLD) {
+                $orders[] = make_order($actorId, 'propose_accession', $other['id']);
+            }
+        } else {
+            $orders[] = make_order($actorId, 'sue_for_peace', $other['id']);
+            if (is_annex_eligible($actor, $other)) {
+                $orders[] = make_order($actorId, 'annex', $other['id']);
+            }
+        }
+    }
+    return $orders;
+}
+
+function shift_relations(array &$world, string $aId, string $bId, float $delta): void {
+    $a = &$world['nations'][$aId];
+    $b = &$world['nations'][$bId];
+    $a['relations'][$bId] = nation_relation($a, $bId) + $delta;
+    $b['relations'][$aId] = nation_relation($b, $aId) + $delta;
+    clamp_nation($a);
+    clamp_nation($b);
+}
+
+function enter_war(array &$world, string $aId, string $bId): void {
+    $a = &$world['nations'][$aId];
+    $b = &$world['nations'][$bId];
+    if (set_has($a['at_war_with'], $bId)) return;
+    set_remove($a['alliances'], $bId);
+    set_remove($b['alliances'], $aId);
+    set_add($a['at_war_with'], $bId);
+    set_add($b['at_war_with'], $aId);
+}
+
+const RIVAL_BLOC_THRESHOLD = -30.0;
+const RIVAL_BLOC_WARINESS_HIT = -3.0;
+const ALLY_SOLIDARITY_RELATION_HIT = -20.0;
+const ALLY_BACKING_RELATION_HIT = -15.0;
+const EMBARGO_SOLIDARITY_RELATION_HIT = -8.0;
+
+function react_third_parties(array &$world, string $actorId, string $targetId, string $event): void {
+    foreach (alive_nations($world) as $other) {
+        if ($other['id'] === $actorId || $other['id'] === $targetId) continue;
+        $oid = $other['id'];
+        if ($event === 'war') {
+            if (set_has($world['nations'][$oid]['alliances'], $targetId)) {
+                shift_relations($world, $oid, $actorId, ALLY_SOLIDARITY_RELATION_HIT);
+                enter_war($world, $oid, $actorId);
+                $tName = $world['nations'][$targetId]['name'];
+                $aName = $world['nations'][$actorId]['name'];
+                w_log($world, "{$world['nations'][$oid]['name']} invokes its defense pact with $tName and joins the war against $aName.");
+            } elseif (set_has($world['nations'][$oid]['alliances'], $actorId)) {
+                shift_relations($world, $oid, $targetId, ALLY_BACKING_RELATION_HIT);
+                $aName = $world['nations'][$actorId]['name'];
+                $tName = $world['nations'][$targetId]['name'];
+                w_log($world, "{$world['nations'][$oid]['name']} backs its ally $aName against $tName.");
+            }
+        } elseif ($event === 'embargo') {
+            if (set_has($world['nations'][$oid]['alliances'], $targetId)) {
+                shift_relations($world, $oid, $actorId, EMBARGO_SOLIDARITY_RELATION_HIT);
+            }
+        } elseif ($event === 'alliance') {
+            $o = $world['nations'][$oid];
+            if (nation_relation($o, $actorId) < RIVAL_BLOC_THRESHOLD || nation_relation($o, $targetId) < RIVAL_BLOC_THRESHOLD) {
+                shift_relations($world, $oid, $actorId, RIVAL_BLOC_WARINESS_HIT);
+                shift_relations($world, $oid, $targetId, RIVAL_BLOC_WARINESS_HIT);
+            }
+        }
+    }
+}
+
+function absorb_nation(array &$world, string $conquerorId, string $absorbedId, bool $peaceful): void {
+    $econFrac = $peaceful ? ACCESSION_ECONOMY_TRANSFER : ANNEX_ECONOMY_TRANSFER;
+    $milFrac = $peaceful ? ACCESSION_MILITARY_TRANSFER : ANNEX_MILITARY_TRANSFER;
+    $resFrac = $peaceful ? ACCESSION_RESOURCE_TRANSFER : ANNEX_RESOURCE_TRANSFER;
+
+    $conqueror = &$world['nations'][$conquerorId];
+    $absorbed = $world['nations'][$absorbedId];
+
+    $conqueror['economy'] += $absorbed['economy'] * $econFrac;
+    $conqueror['economic_potential'] += $absorbed['economic_potential'] * $econFrac;
+    $conqueror['military'] += $absorbed['military'] * $milFrac;
+    foreach ($absorbed['resources'] as $r => $v) {
+        $conqueror['resources'][$r] = ($conqueror['resources'][$r] ?? 0.0) + $v * $resFrac;
+    }
+
+    if ($peaceful) {
+        $conqueror['public_opinion'] += ACCESSION_OPINION_BOOST;
+    } else {
+        $conqueror['stability'] += ANNEX_STABILITY_HIT;
+        $conqueror['public_opinion'] += ANNEX_OPINION_HIT;
+        $condemners = 0;
+        foreach (alive_nations($world) as $other) {
+            if ($other['id'] === $conquerorId || $other['id'] === $absorbedId) continue;
+            if (in_array($other['government_type'], ELECTED_GOVERNMENT_TYPES, true)) {
+                shift_relations($world, $other['id'], $conquerorId, ANNEX_RIVAL_RELATION_HIT);
+                $condemners++;
+            }
+        }
+        if ($condemners > 0) {
+            w_log($world, "The world's democracies condemn {$conqueror['name']}'s annexation of {$absorbed['name']}.");
+        }
+    }
+
+    $world['nations'][$absorbedId]['alive'] = false;
+    purge_nation_references($world, $absorbedId);
+    clamp_nation($conqueror);
+}
+
+function resolve_pass(array &$world, array $order): void {
+    $world['nations'][$order['actor_id']]['stability'] += 1.0;
+}
+
+function resolve_build_military(array &$world, array $order): void {
+    $actor = &$world['nations'][$order['actor_id']];
+    $room = max(0.0, STAT_MAX - $actor['military']);
+    if ($room <= 0.0) {
+        w_log($world, "{$actor['name']}'s military is already at full strength; the buildup has nowhere to go.");
+        return;
+    }
+    $spend = min(15.0, $actor['economy'] * 0.2, $room / 1.2);
+    $actor['economy'] -= $spend;
+    $actor['military'] += $spend * 1.2;
+}
+
+function resolve_invest_economy(array &$world, array $order): void {
+    $actor = &$world['nations'][$order['actor_id']];
+    $actor['economy'] += 5.0 + ($actor['resources']['energy'] ?? 0.0) * 0.02;
+    $actor['stability'] += 0.5;
+    $actor['economic_potential'] += 0.6;
+}
+
+function resolve_invest_sector(array &$world, array $order): void {
+    $actor = &$world['nations'][$order['actor_id']];
+    $sector = $order['detail'];
+    $cost = min(10.0, $actor['economy'] * 0.15);
+    $actor['economy'] -= $cost;
+    $actor['sectors'][$sector] = ($actor['sectors'][$sector] ?? 0.0) + $cost;
+    $commodity = SECTOR_COMMODITY[$sector] ?? null;
+    if ($commodity) {
+        $actor['resources'][$commodity] = ($actor['resources'][$commodity] ?? 0.0) + 5.0;
+    }
+    $label = str_replace(['_sector', '_'], ['', ' '], $sector);
+    w_log($world, "{$actor['name']} invests in its $label sector.");
+}
+
+function resolve_modify_constitution(array &$world, array $order): void {
+    $actor = &$world['nations'][$order['actor_id']];
+    $oldType = $actor['government_type'];
+    $newType = $order['detail'];
+    if ($newType === $oldType) {
+        w_log($world, "{$actor['name']} reaffirms its existing $oldType constitution.");
+        return;
+    }
+    $wasElected = in_array($oldType, ELECTED_GOVERNMENT_TYPES, true);
+    $becomesElected = in_array($newType, ELECTED_GOVERNMENT_TYPES, true);
+
+    if ($wasElected && !$becomesElected) {
+        $actor['public_opinion'] += CONSTITUTION_COUP_OPINION_HIT;
+        $actor['stability'] += CONSTITUTION_COUP_STABILITY_HIT;
+        w_log($world, "{$actor['name']} abolishes its $oldType constitution and imposes $newType rule.");
+        $condemners = 0;
+        foreach (alive_nations($world) as $other) {
+            if ($other['id'] === $actor['id']) continue;
+            if (in_array($other['government_type'], ELECTED_GOVERNMENT_TYPES, true)) {
+                shift_relations($world, $other['id'], $actor['id'], CONSTITUTION_COUP_RELATION_HIT);
+                $condemners++;
+            }
+        }
+        if ($condemners > 0) {
+            w_log($world, "The world's democracies condemn {$actor['name']}'s power grab.");
+        }
+    } elseif (!$wasElected && $becomesElected) {
+        $actor['public_opinion'] += CONSTITUTION_LIBERALIZATION_OPINION_BOOST;
+        $actor['stability'] += CONSTITUTION_TRANSITION_STABILITY_HIT;
+        $actor['election_due_turn'] = $world['turn'] + ELECTION_TERM_LENGTH;
+        w_log($world, "{$actor['name']} adopts a $newType constitution and schedules elections.");
+    } else {
+        $actor['public_opinion'] += CONSTITUTION_REFORM_OPINION_DELTA;
+        w_log($world, "{$actor['name']} reforms its constitution from $oldType to $newType.");
+    }
+    $actor['government_type'] = $newType;
+}
+
+function resolve_improve_relations(array &$world, array $order): void {
+    shift_relations($world, $order['actor_id'], $order['target_id'], 8.0);
+}
+
+function resolve_propose_alliance(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id'];
+    $actor = $world['nations'][$a]; $target = $world['nations'][$t];
+    if (nation_relation($actor, $t) >= ALLIANCE_RELATION_THRESHOLD && nation_relation($target, $a) >= ALLIANCE_RELATION_THRESHOLD) {
+        set_add($world['nations'][$a]['alliances'], $t);
+        set_add($world['nations'][$t]['alliances'], $a);
+        $world['nations'][$a]['public_opinion'] += ALLIANCE_OPINION_BOOST;
+        $world['nations'][$t]['public_opinion'] += ALLIANCE_OPINION_BOOST;
+        w_log($world, "{$actor['name']} and {$target['name']} form an alliance.");
+        react_third_parties($world, $a, $t, 'alliance');
+    }
+}
+
+function resolve_break_alliance(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id'];
+    if (set_has($world['nations'][$a]['alliances'], $t)) {
+        set_remove($world['nations'][$a]['alliances'], $t);
+        set_remove($world['nations'][$t]['alliances'], $a);
+        shift_relations($world, $a, $t, BREAK_ALLIANCE_RELATION_HIT);
+        w_log($world, "{$world['nations'][$a]['name']} breaks its alliance with {$world['nations'][$t]['name']}.");
+    }
+}
+
+function resolve_trade_pact(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id'];
+    $actor = $world['nations'][$a]; $target = $world['nations'][$t];
+    if (nation_relation($actor, $t) >= 0 && nation_relation($target, $a) >= 0) {
+        set_add($world['nations'][$a]['trade_pacts'], $t);
+        set_add($world['nations'][$t]['trade_pacts'], $a);
+        w_log($world, "{$actor['name']} and {$target['name']} sign a trade pact.");
+    }
+}
+
+function resolve_impose_embargo(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id'];
+    set_add($world['nations'][$a]['embargoes_against'], $t);
+    set_remove($world['nations'][$a]['trade_pacts'], $t);
+    set_remove($world['nations'][$t]['trade_pacts'], $a);
+    shift_relations($world, $a, $t, EMBARGO_RELATION_HIT);
+    $world['nations'][$t]['public_opinion'] += EMBARGO_RECEIVED_OPINION_HIT;
+    w_log($world, "{$world['nations'][$a]['name']} imposes an embargo on {$world['nations'][$t]['name']}.");
+    react_third_parties($world, $a, $t, 'embargo');
+}
+
+function resolve_declare_war(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id'];
+    if (set_has($world['nations'][$a]['at_war_with'], $t)) return;
+    $preWarHostility = nation_relation($world['nations'][$a], $t);
+    enter_war($world, $a, $t);
+    shift_relations($world, $a, $t, WAR_RELATION_HIT);
+    $world['nations'][$a]['public_opinion'] += $preWarHostility <= -50.0 ? WAR_OPINION_HIT_JUSTIFIED : WAR_OPINION_HIT_UNPROVOKED;
+    $world['nations'][$t]['public_opinion'] += RALLY_AROUND_FLAG_OPINION_BOOST;
+    w_log($world, "{$world['nations'][$a]['name']} declares war on {$world['nations'][$t]['name']}!");
+    react_third_parties($world, $a, $t, 'war');
+}
+
+function resolve_sue_for_peace(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id'];
+    if (!set_has($world['nations'][$a]['at_war_with'], $t)) return;
+    $actor = $world['nations'][$a]; $target = $world['nations'][$t];
+    $targetDominant = $target['military'] > $actor['military'] * 1.3;
+    $mutuallyExhausted = $actor['military'] < 15.0 && $target['military'] < 15.0;
+    if (!$targetDominant || $mutuallyExhausted) {
+        set_remove($world['nations'][$a]['at_war_with'], $t);
+        set_remove($world['nations'][$t]['at_war_with'], $a);
+        $world['nations'][$a]['truce_until'][$t] = $world['turn'] + TRUCE_DURATION;
+        $world['nations'][$t]['truce_until'][$a] = $world['turn'] + TRUCE_DURATION;
+        $losing = $actor['military'] < $target['military'] * 0.8;
+        $world['nations'][$a]['public_opinion'] += $losing ? PEACE_HUMILIATION_OPINION_HIT : PEACE_RELIEF_OPINION_BOOST;
+        $world['nations'][$t]['public_opinion'] += PEACE_RELIEF_OPINION_BOOST;
+        w_log($world, "{$actor['name']} and {$target['name']} agree to a ceasefire.");
+    } else {
+        w_log($world, "{$target['name']} presses its advantage and rejects {$actor['name']}'s peace offer.");
+    }
+}
+
+function resolve_annex(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id'];
+    if (!set_has($world['nations'][$a]['at_war_with'], $t)) return;
+    if (!is_annex_eligible($world['nations'][$a], $world['nations'][$t])) {
+        w_log($world, "{$world['nations'][$a]['name']} attempts to annex {$world['nations'][$t]['name']}, but its forces haven't been crushed decisively enough.");
+        return;
+    }
+    $tName = $world['nations'][$t]['name'];
+    absorb_nation($world, $a, $t, false);
+    w_log($world, "{$world['nations'][$a]['name']} annexes $tName outright, absorbing its territory and population.");
+}
+
+function resolve_propose_accession(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id'];
+    $actor = $world['nations'][$a]; $target = $world['nations'][$t];
+    $mutual = min(nation_relation($actor, $t), nation_relation($target, $a));
+    if ($mutual < ACCESSION_RELATION_THRESHOLD) {
+        w_log($world, "{$actor['name']}'s population votes against joining {$target['name']}; ties remain close but sovereign.");
+        return;
+    }
+    $aName = $actor['name']; $tName = $target['name'];
+    absorb_nation($world, $t, $a, true);
+    w_log($world, "$aName votes to join $tName in a peaceful union.");
+}
+
+const HOSTILE_WORDS = ['demand', 'threat', 'ultimatum', 'attack', 'seize', 'annex', 'invade', 'destroy', 'refund', 'reparation', 'punish', 'conquer', 'strike', 'bomb', 'sanction', 'humiliate', 'dominate', 'reject', 'insult'];
+const FRIENDLY_WORDS = ['gift', 'apolog', 'support', 'help', 'praise', 'honor', 'celebrate', 'thank', 'donate', 'forgive', 'welcome', 'invite', 'gratitude', 'friendship', 'congratulat'];
+const WILDCARD_RELATION_SCALE = -6.0;
+const WILDCARD_DOMESTIC_SCALE = 1.5;
+const WILDCARD_PROVOCATION_THRESHOLD = 2;
+
+function sentiment_magnitude(string $text): int {
+    $lowered = mb_strtolower($text);
+    $hostile = 0; $friendly = 0;
+    foreach (HOSTILE_WORDS as $w) if (str_contains($lowered, $w)) $hostile++;
+    foreach (FRIENDLY_WORDS as $w) if (str_contains($lowered, $w)) $friendly++;
+    return max(-3, min(3, $hostile - $friendly));
+}
+
+function resolve_wildcard(array &$world, array $order): void {
+    $actor = &$world['nations'][$order['actor_id']];
+    $text = trim((string)($order['detail'] ?? ''));
+    $snippet = mb_strlen($text) <= 70 ? $text : mb_substr($text, 0, 67) . '...';
+    $magnitude = sentiment_magnitude($text);
+    $targetId = $order['target_id'];
+
+    if ($targetId === null) {
+        $actor['public_opinion'] += $magnitude * WILDCARD_DOMESTIC_SCALE;
+        clamp_nation($actor);
+        w_log($world, "{$actor['name']}'s government makes an unusual public statement: \"$snippet\"");
+        return;
+    }
+
+    shift_relations($world, $order['actor_id'], $targetId, $magnitude * WILDCARD_RELATION_SCALE);
+    $target = $world['nations'][$targetId];
+    if ($magnitude > 0) {
+        w_log($world, "{$actor['name']} makes an extraordinary demand of {$target['name']}: \"$snippet\"");
+        w_log($world, "{$target['name']} rebuffs the demand and relations sour.");
+        if ($magnitude >= WILDCARD_PROVOCATION_THRESHOLD) {
+            react_third_parties($world, $order['actor_id'], $targetId, 'embargo');
+            w_log($world, "{$target['name']}'s allies take note of {$actor['name']}'s provocation.");
+        }
+    } elseif ($magnitude < 0) {
+        w_log($world, "{$actor['name']} extends an unusual goodwill gesture to {$target['name']}: \"$snippet\"");
+        w_log($world, "{$target['name']} is pleasantly surprised; relations warm slightly.");
+    } else {
+        w_log($world, "{$actor['name']} makes a puzzling statement toward {$target['name']}: \"$snippet\"");
+        w_log($world, "{$target['name']} isn't sure what to make of it.");
+    }
+}
+
+const ORDER_RESOLVERS = [
+    'pass' => 'resolve_pass',
+    'build_military' => 'resolve_build_military',
+    'invest_economy' => 'resolve_invest_economy',
+    'invest_sector' => 'resolve_invest_sector',
+    'modify_constitution' => 'resolve_modify_constitution',
+    'improve_relations' => 'resolve_improve_relations',
+    'propose_alliance' => 'resolve_propose_alliance',
+    'break_alliance' => 'resolve_break_alliance',
+    'trade_pact' => 'resolve_trade_pact',
+    'impose_embargo' => 'resolve_impose_embargo',
+    'declare_war' => 'resolve_declare_war',
+    'sue_for_peace' => 'resolve_sue_for_peace',
+    'annex' => 'resolve_annex',
+    'propose_accession' => 'resolve_propose_accession',
+    'wildcard' => 'resolve_wildcard',
+];
+
+function resolve_orders(array &$world, array $orders): void {
+    usort($orders, fn($a, $b) => ORDER_PRIORITY[$a['type']] <=> ORDER_PRIORITY[$b['type']]);
+    foreach ($orders as $order) {
+        $actorId = $order['actor_id'];
+        if (!isset($world['nations'][$actorId]) || !$world['nations'][$actorId]['alive']) continue;
+        if ($order['target_id'] !== null) {
+            $t = $order['target_id'];
+            if (!isset($world['nations'][$t]) || !$world['nations'][$t]['alive']) continue;
+        }
+        $fn = ORDER_RESOLVERS[$order['type']];
+        $fn($world, $order);
+        if (isset($world['nations'][$actorId])) clamp_nation($world['nations'][$actorId]);
+        if ($order['target_id'] !== null && isset($world['nations'][$order['target_id']])) {
+            clamp_nation($world['nations'][$order['target_id']]);
+        }
+    }
+}
