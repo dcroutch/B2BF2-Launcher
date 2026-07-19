@@ -2,12 +2,15 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Concert of Nations</title>
+<title>World Sim</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
   h1 { margin-bottom: 0.2rem; }
-  .sub { opacity: 0.7; margin-top: 0; }
+  #intro { max-width: 640px; }
+  #intro h2 { font-size: 1.05rem; margin-bottom: 0.3rem; }
+  #intro p { line-height: 1.5; }
+  #intro ul { line-height: 1.5; padding-left: 1.2rem; }
   #setup, #game { display: none; }
   #setup.active, #game.active { display: block; }
   select, input[type=text], button { font-size: 1rem; padding: 0.5rem; }
@@ -29,8 +32,25 @@
 </style>
 </head>
 <body>
-<h1>Concert of Nations</h1>
-<p class="sub">A deterministic, offline geopolitical strategy sim &mdash; no AI/LLM. No turn cap: play until you win, lose, or quit. Each turn represents one month. (PHP edition &mdash; runs on any shared host, no shell access needed.)</p>
+<h1>World Sim</h1>
+
+<div id="intro">
+  <p>World Sim is a turn based strategy game where you run a nation on the world stage. There is no AI text generation behind it. Every reaction comes from a fixed set of rules, so the same choices always lead to the same outcome.</p>
+  <p>Pick a nation, then tell it what to do each turn in plain language. The other nations act too, driven by the same rules, so the world keeps moving whether or not you're paying close attention.</p>
+
+  <h2>How a turn works</h2>
+  <p>Each turn represents one month. Type an instruction like "invest in technology" or "declare war on Russia" and send it. You can queue up several instructions at once by separating them with a semicolon or a new line. Use the skip option if you'd rather advance a few months without issuing new orders.</p>
+  <p>Prefer picking from a list instead of typing? Use the Menu button for a set of ready made actions you can choose by number.</p>
+
+  <h2>Tips</h2>
+  <ul>
+    <li>You only ever control your own nation. If you write about another country's leader or army, your government reacts to what you said rather than controlling that country.</li>
+    <li>Watch stability and public opinion closely. A government that loses too much support can be voted out or collapse outright, and that ends the game.</li>
+    <li>War is costly. Declaring one drains your economy and military over time, so make sure you can actually finish what you start.</li>
+    <li>Alliances matter. Attacking an allied nation can drag its whole defense pact into the fight against you.</li>
+    <li>There's no turn limit. Keep playing as long as you like, or use Quit whenever you're done.</li>
+  </ul>
+</div>
 
 <div id="setup" class="active">
   <label>Choose your nation:
@@ -131,7 +151,7 @@ function render(state) {
   if (state.error) { alert(state.error); return; }
   const p = state.player;
   document.getElementById('turnHeader').textContent =
-    `Month ${state.turn} — ${p.name} (${p.government_type})`;
+    `Month ${state.turn}: ${p.name} (${p.government_type})`;
 
   const electionText = p.turns_to_election === null ? 'no elections (authoritarian)'
     : `next election in ${p.turns_to_election} month(s)`;
