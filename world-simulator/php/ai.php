@@ -75,6 +75,11 @@ function score_order(array $world, array $order): float {
 
     if ($type === 'propose_accession') return -50.0;
 
+    if ($type === 'invite_accession') {
+        $mutual = min(nation_relation($actor, $order['target_id']), nation_relation($target, $order['actor_id']));
+        return 5.0 + $mutual * 0.05;
+    }
+
     return -100.0;
 }
 

@@ -149,6 +149,15 @@ being an independent actor:
   just one); the smaller nation dissolves into the larger one at a much
   better transfer rate than conquest (80% vs. 50%), with no international
   alarm.
+- **`invite_accession`** — the other direction of the same mechanic: a
+  nation that is genuinely the stronger, more prosperous side of a
+  high-trust pair can invite the weaker one to join it, instead of only
+  ever being able to ask to join someone else. Same relation bar and
+  transfer rate as `propose_accession`; AI nations will pursue it on
+  their own (unlike `propose_accession`, it never costs them their own
+  existence), and it's a genuine non-military win path for the player —
+  build up the economy, keep relations warm, and friendly rivals can be
+  drawn into voluntary union instead of conquered.
 
 **Bug fixed as part of this**: `sue_for_peace` used to check whether the
 *asker* was dominant before accepting a ceasefire — which is backwards,

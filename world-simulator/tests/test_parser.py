@@ -80,6 +80,11 @@ class TestVerbRecognition(unittest.TestCase):
         order = parse_command(world, "canada", "We vote to join the United States")
         self.assertEqual(order, Order("canada", "propose_accession", "usa"))
 
+    def test_invite_accession_recognized_with_target(self):
+        world = default_world(player_id="usa")
+        order = parse_command(world, "usa", "Let's invite Canada to join our union")
+        self.assertEqual(order, Order("usa", "invite_accession", "canada"))
+
     def test_generic_investment_without_sector_falls_back(self):
         world = default_world(player_id="usa")
         order = parse_command(world, "usa", "Stimulate the economy")

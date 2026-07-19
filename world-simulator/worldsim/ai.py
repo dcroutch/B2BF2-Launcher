@@ -98,6 +98,15 @@ def score_order(world: World, order: Order) -> float:
         # fully supported) without any AI nation randomly dissolving itself.
         return -50
 
+    if order.type == "invite_accession":
+        # Unlike propose_accession this doesn't cost the AI its own
+        # existence -- it's the stronger side absorbing a weaker, trusted
+        # neighbor, so a real strategic incentive is fine (mirrors
+        # propose_alliance's scoring, just worth more since it's a
+        # permanent gain rather than an ongoing pact).
+        mutual_relation = min(actor.relation(target.id), target.relation(actor.id))
+        return 5.0 + mutual_relation * 0.05
+
     return -100  # unknown order types never win
 
 

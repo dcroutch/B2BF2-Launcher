@@ -23,18 +23,19 @@ const ORDER_TYPES = [
     'pass', 'build_military', 'invest_economy', 'invest_sector',
     'improve_relations', 'propose_alliance', 'break_alliance', 'trade_pact',
     'impose_embargo', 'declare_war', 'sue_for_peace', 'annex',
-    'propose_accession', 'modify_constitution', 'wildcard',
+    'propose_accession', 'invite_accession', 'modify_constitution', 'wildcard',
 ];
 
 const TARGETED_ORDERS = [
     'improve_relations', 'propose_alliance', 'break_alliance', 'trade_pact',
     'impose_embargo', 'declare_war', 'sue_for_peace', 'annex', 'propose_accession',
+    'invite_accession',
 ];
 
 const ORDER_PRIORITY = [
     'improve_relations' => 0, 'propose_alliance' => 0, 'break_alliance' => 0,
     'trade_pact' => 0, 'impose_embargo' => 0, 'sue_for_peace' => 0,
-    'propose_accession' => 0, 'wildcard' => 0,
+    'propose_accession' => 0, 'invite_accession' => 0, 'wildcard' => 0,
     'invest_economy' => 1, 'invest_sector' => 1, 'build_military' => 1,
     'modify_constitution' => 1,
     'declare_war' => 2, 'annex' => 2,
@@ -160,6 +161,9 @@ function legal_orders(array $world, string $actorId): array {
             }
             if ($mutual >= ACCESSION_RELATION_THRESHOLD) {
                 $orders[] = make_order($actorId, 'propose_accession', $other['id']);
+                if ($actor['economy'] > $other['economy'] && $actor['military'] > $other['military']) {
+                    $orders[] = make_order($actorId, 'invite_accession', $other['id']);
+                }
             }
         } else {
             $orders[] = make_order($actorId, 'sue_for_peace', $other['id']);
@@ -390,6 +394,14 @@ const ACCESSION_MESSAGES = [
     "{a} votes to join {t} in a peaceful union.",
     "{a}'s population votes to dissolve into {t} in a peaceful union.",
 ];
+const INVITE_ACCESSION_REJECTED_MESSAGES = [
+    "{t} appreciates {a}'s invitation but its population votes to remain independent.",
+    "{t} declines {a}'s offer of union at the ballot box; ties stay close but sovereign.",
+];
+const INVITE_ACCESSION_MESSAGES = [
+    "{t}'s population votes to join {a}, drawn by its prosperity and stability.",
+    "{t} accepts {a}'s invitation and peacefully joins the union.",
+];
 
 function fill(string $template, array $vars): string {
     return strtr($template, array_combine(
@@ -611,6 +623,19 @@ function resolve_propose_accession(array &$world, array $order): void {
     w_log($world, fill(pick_variant(ACCESSION_MESSAGES, $world['turn'], $a, $t), ['a' => $aName, 't' => $tName]));
 }
 
+function resolve_invite_accession(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id'];
+    $actor = $world['nations'][$a]; $target = $world['nations'][$t];
+    $mutual = min(nation_relation($actor, $t), nation_relation($target, $a));
+    if ($mutual < ACCESSION_RELATION_THRESHOLD || !($actor['economy'] > $target['economy'] && $actor['military'] > $target['military'])) {
+        w_log($world, fill(pick_variant(INVITE_ACCESSION_REJECTED_MESSAGES, $world['turn'], $a, $t), ['a' => $actor['name'], 't' => $target['name']]));
+        return;
+    }
+    $aName = $actor['name']; $tName = $target['name'];
+    absorb_nation($world, $a, $t, true);
+    w_log($world, fill(pick_variant(INVITE_ACCESSION_MESSAGES, $world['turn'], $a, $t), ['a' => $aName, 't' => $tName]));
+}
+
 const HOSTILE_WORDS = ['demand', 'threat', 'ultimatum', 'attack', 'seize', 'annex', 'invade', 'destroy', 'refund', 'reparation', 'punish', 'conquer', 'strike', 'bomb', 'sanction', 'humiliate', 'dominate', 'reject', 'insult'];
 // Regression fix: a naive alliance-seeking sentence like "let's team up
 // with the UK in case anyone attacks us" used to score as an
@@ -677,6 +702,7 @@ const ORDER_RESOLVERS = [
     'sue_for_peace' => 'resolve_sue_for_peace',
     'annex' => 'resolve_annex',
     'propose_accession' => 'resolve_propose_accession',
+    'invite_accession' => 'resolve_invite_accession',
     'wildcard' => 'resolve_wildcard',
 ];
 

@@ -117,6 +117,7 @@ VERB_RULES = (
     ("break_alliance", ("break alliance", "break our alliance", "betray", "abandon our alliance", "end alliance", "end our alliance")),
     ("propose_alliance", ("alliance", "ally with", "mutual defense", "defense pact", "team up with", "join forces with")),
     ("trade_pact", ("trade deal", "trade pact", "trade agreement", "free trade", "trade with")),
+    ("invite_accession", ("invite", "to join us", "join our union", "join our nation", "come join us", "into our union", "part of our nation", "part of our union")),
     ("improve_relations", ("improve relations", "diplomacy", "reach out", "extend friendship", "make friends", "be friends with", "apologize")),
     ("build_military", ("build military", "build up the military", "rearm", "mobilize", "increase defense spending", "build army", "on the military", "on the army", "military spending", "fund the military", "boost the military", "boost the army", "beef up the military", "beef up the army")),
     (

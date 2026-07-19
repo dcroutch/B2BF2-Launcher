@@ -47,6 +47,14 @@ ORDER_TYPES = (
     # self-only-in-spirit order in that it can only ever remove *the
     # actor itself* from the map, never force another nation to disband.
     "propose_accession",
+    # The mirror image of propose_accession: the actor, being the more
+    # prosperous and trusted of the pair, invites a friendly, weaker
+    # neighbor to join it instead of asking to join them. Same relation
+    # bar and the same voluntary, no-alarm merge mechanics as accession --
+    # just initiated from the stronger side, which is the only way a
+    # player growing through quality of life and diplomacy rather than
+    # conquest can ever pull a rival onto their own side of the map.
+    "invite_accession",
     # Self-only, like invest_sector: no other nation can ever be the target
     # of this order, so no input text can change *another* nation's form of
     # government -- only the actor's own.
@@ -66,6 +74,7 @@ PRIORITY = {
     "impose_embargo": 0,
     "sue_for_peace": 0,
     "propose_accession": 0,
+    "invite_accession": 0,
     "wildcard": 0,
     "invest_economy": 1,
     "invest_sector": 1,
@@ -110,6 +119,7 @@ TARGETED_ORDERS = {
     "sue_for_peace",
     "annex",
     "propose_accession",
+    "invite_accession",
 }
 
 ALLIANCE_RELATION_THRESHOLD = 40
@@ -206,6 +216,12 @@ def legal_orders(world: World, actor_id: str):
                 yield Order(actor_id, "declare_war", other.id)
             if mutual_relation >= ACCESSION_RELATION_THRESHOLD:
                 yield Order(actor_id, "propose_accession", other.id)
+                # Only offered the other way when the actor is genuinely
+                # the more prosperous, more powerful side of the pair --
+                # nobody plausibly votes to leave a stronger state for a
+                # weaker one, invitation or not.
+                if actor.economy > other.economy and actor.military > other.military:
+                    yield Order(actor_id, "invite_accession", other.id)
         else:
             yield Order(actor_id, "sue_for_peace", other.id)
             if _is_annex_eligible(actor, other):
@@ -430,6 +446,14 @@ ACCESSION_REJECTED_MESSAGES = (
 ACCESSION_MESSAGES = (
     "{a} votes to join {t} in a peaceful union.",
     "{a}'s population votes to dissolve into {t} in a peaceful union.",
+)
+INVITE_ACCESSION_REJECTED_MESSAGES = (
+    "{t} appreciates {a}'s invitation but its population votes to remain independent.",
+    "{t} declines {a}'s offer of union at the ballot box; ties stay close but sovereign.",
+)
+INVITE_ACCESSION_MESSAGES = (
+    "{t}'s population votes to join {a}, drawn by its prosperity and stability.",
+    "{t} accepts {a}'s invitation and peacefully joins the union.",
 )
 
 
@@ -728,6 +752,19 @@ def _resolve_propose_accession(world: World, order: Order) -> None:
     world.log(_pick_variant(ACCESSION_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
 
 
+def _resolve_invite_accession(world: World, order: Order) -> None:
+    actor = world.get(order.actor_id)  # the stronger side, absorbs target
+    target = world.get(order.target_id)  # invited to dissolve into actor
+    mutual_relation = min(actor.relation(target.id), target.relation(actor.id))
+    if mutual_relation < ACCESSION_RELATION_THRESHOLD or not (
+        actor.economy > target.economy and actor.military > target.military
+    ):
+        world.log(_pick_variant(INVITE_ACCESSION_REJECTED_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
+        return
+    absorb_nation(world, actor, target, peaceful=True)
+    world.log(_pick_variant(INVITE_ACCESSION_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
+
+
 # A lightweight, deterministic sentiment lexicon -- not a language model,
 # just a fixed word list -- so wildly unusual player input ("demand a
 # refund of the Louisiana Purchase") still gets a proportionate, legible
@@ -812,6 +849,7 @@ RESOLVERS = {
     "sue_for_peace": _resolve_sue_for_peace,
     "annex": _resolve_annex,
     "propose_accession": _resolve_propose_accession,
+    "invite_accession": _resolve_invite_accession,
     "wildcard": _resolve_wildcard,
 }
 

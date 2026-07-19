@@ -152,6 +152,46 @@ class TestAccession(unittest.TestCase):
         self.assertTrue(world.get("a").alive)
 
 
+class TestInviteAccession(unittest.TestCase):
+    def test_invite_offered_only_when_actor_is_stronger_and_richer(self):
+        world = make_world(a={"economy": 80, "military": 80}, b={"economy": 40, "military": 40})
+        world.get("a").relations["b"] = 80
+        world.get("b").relations["a"] = 80
+        types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
+        self.assertIn("invite_accession", types)
+        # From the weaker side, the offer doesn't run the other way.
+        types = [o.type for o in legal_orders(world, "b") if o.target_id == "a"]
+        self.assertNotIn("invite_accession", types)
+
+    def test_invite_merges_target_into_actor_peacefully(self):
+        world = make_world(a={"economy": 80, "military": 80}, b={"economy": 40, "military": 40, "stability": 70})
+        world.get("a").relations["b"] = 80
+        world.get("b").relations["a"] = 80
+        resolve_orders(world, [Order("a", "invite_accession", "b")])
+        self.assertTrue(world.get("a").alive)
+        self.assertFalse(world.get("b").alive)
+        self.assertGreater(world.get("a").economy, 80)
+
+    def test_invite_rejected_below_relation_threshold(self):
+        world = make_world(a={"economy": 80, "military": 80}, b={"economy": 40, "military": 40})
+        world.get("a").relations["b"] = 40
+        world.get("b").relations["a"] = 40
+        resolve_orders(world, [Order("a", "invite_accession", "b")])
+        self.assertTrue(world.get("a").alive)
+        self.assertTrue(world.get("b").alive)
+
+    def test_invite_rejected_when_actor_is_not_actually_stronger(self):
+        # legal_orders wouldn't offer this, but the resolver itself must
+        # not merge on relation alone if directly invoked with a target
+        # that isn't actually weaker/poorer.
+        world = make_world(a={"economy": 40, "military": 40}, b={"economy": 80, "military": 80})
+        world.get("a").relations["b"] = 80
+        world.get("b").relations["a"] = 80
+        resolve_orders(world, [Order("a", "invite_accession", "b")])
+        self.assertTrue(world.get("a").alive)
+        self.assertTrue(world.get("b").alive)
+
+
 class TestCollapseDuringWarBecomesAnnexation(unittest.TestCase):
     def test_collapsing_while_at_war_is_annexed_by_the_strongest_enemy(self):
         world = make_world(a={"military": 90}, b={"military": 5, "stability": 0})
