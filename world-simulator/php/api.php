@@ -147,6 +147,10 @@ if ($action === 'order' && $method === 'POST') {
     $data = read_json_body();
     $text = trim((string)($data['text'] ?? ''));
     $index = $data['index'] ?? null;
+    $turns = $data['turns'] ?? 1;
+    if (!is_int($turns) || $turns < 1) {
+        $turns = 1;
+    }
 
     try {
         if ($index !== null) {
@@ -154,14 +158,16 @@ if ($action === 'order' && $method === 'POST') {
             if (!is_int($index) || $index < 0 || $index >= count($options)) {
                 json_out(['error' => 'invalid menu index'], 400);
             }
-            $order = $options[$index];
+            $orders = [$options[$index]];
         } elseif ($text !== '') {
-            $order = parse_command($world, $playerId, $text);
+            // A single submission can hold several instructions for the
+            // same turn ("invest in energy; embargo Russia").
+            $orders = parse_commands($world, $playerId, $text);
         } else {
             json_out(['error' => "provide 'text' or 'index'"], 400);
         }
 
-        run_turn($world, [$order]);
+        advance_turns($world, $playerId, $orders, $turns);
     } catch (Throwable $e) {
         json_out(['error' => 'internal error resolving order'], 500);
     }

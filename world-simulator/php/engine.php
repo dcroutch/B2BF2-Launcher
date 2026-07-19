@@ -273,3 +273,25 @@ function game_status(array $world, string $playerId): ?string {
     if (count($aliveMain) === 1 && $aliveMain[0]['id'] === $playerId) return 'win';
     return null;
 }
+
+// One turn represents one month. Purely a labeling/UI concept -- nothing
+// in the engine's math depends on it.
+const TURN_LENGTH_MONTHS = 1;
+
+// Resolve $playerOrders (the player may submit several at once, e.g.
+// "invest in energy" + "embargo Russia" in the same turn) on the first
+// turn, then run $numTurns - 1 further turns with no further player
+// input -- an implicit pass -- so the player can skip ahead several
+// months at once instead of being stopped for input every single turn.
+// Returns every event_log line produced across all the turns advanced;
+// stops early the moment game_status stops being null, since there's no
+// point simulating further turns once the game has ended.
+function advance_turns(array &$world, string $playerId, array $playerOrders, int $numTurns): array {
+    $startCursor = count($world['event_log']);
+    run_turn($world, $playerOrders);
+    for ($i = 0; $i < max(0, $numTurns - 1); $i++) {
+        if (game_status($world, $playerId) !== null) break;
+        run_turn($world, [make_order($playerId, 'pass')]);
+    }
+    return array_slice($world['event_log'], $startCursor);
+}

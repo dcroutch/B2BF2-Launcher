@@ -1,7 +1,7 @@
 import random
 import unittest
 
-from worldsim.engine import game_status, run_turn
+from worldsim.engine import advance_turns, game_status, run_turn
 from worldsim.orders import Order
 from worldsim.scenarios import default_world
 
@@ -110,6 +110,49 @@ class TestGameStatus(unittest.TestCase):
         world = default_world()
         world.turn = 100_000
         self.assertIsNone(game_status(world, "usa"))
+
+
+class TestAdvanceTurns(unittest.TestCase):
+    """advance_turns lets a player submit several orders for the current
+    turn and then skip ahead N turns (months) at once, with no further
+    input, collecting every event across the whole skip into one digest."""
+
+    def test_advances_the_requested_number_of_turns(self):
+        world = default_world()
+        rng = random.Random(1)
+        advance_turns(world, "usa", [Order("usa", "pass")], num_turns=3, rng=rng)
+        self.assertEqual(world.turn, 3)
+
+    def test_all_submitted_orders_resolve_on_the_first_turn(self):
+        world = default_world()
+        rng = random.Random(1)
+        before_energy = world.get("usa").sectors["energy_sector"]
+        orders = [
+            Order("usa", "invest_sector", detail="energy_sector"),
+            Order("usa", "impose_embargo", "russia"),
+        ]
+        advance_turns(world, "usa", orders, num_turns=1, rng=rng)
+        self.assertGreater(world.get("usa").sectors["energy_sector"], before_energy)
+        self.assertIn("russia", world.get("usa").embargoes_against)
+
+    def test_returns_the_combined_log_across_every_turn_advanced(self):
+        world = default_world()
+        rng = random.Random(1)
+        start = len(world.event_log)
+        log = advance_turns(world, "usa", [Order("usa", "pass")], num_turns=3, rng=rng)
+        self.assertEqual(log, world.event_log[start:])
+        self.assertGreater(len(log), 0)
+
+    def test_stops_early_if_the_game_ends_partway_through_the_skip(self):
+        world = default_world()
+        world.get("usa").in_power = False
+        rng = random.Random(1)
+        turn_before = world.turn
+        advance_turns(world, "usa", [Order("usa", "pass")], num_turns=6, rng=rng)
+        # Only the first turn (which already carried the losing state) ran;
+        # game_status was already non-None before any further turn, so the
+        # loop broke immediately instead of simulating 5 more turns.
+        self.assertEqual(world.turn, turn_before + 1)
 
 
 if __name__ == "__main__":

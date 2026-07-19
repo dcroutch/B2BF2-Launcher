@@ -108,6 +108,30 @@ class TestOrders(unittest.TestCase):
         status, _, payload = call("POST", "/api/order", {"index": 999999}, cookie=cookie)
         self.assertEqual(status, "400 Bad Request")
 
+    def test_multiple_semicolon_separated_instructions_resolve_the_same_turn(self):
+        cookie, _ = new_game("usa")
+        status, _, payload = call(
+            "POST", "/api/order",
+            {"text": "invest in technology; embargo Russia"}, cookie=cookie,
+        )
+        self.assertEqual(status, "200 OK")
+        self.assertEqual(payload["turn"], 1)
+        self.assertTrue(any("embargo" in line.lower() for line in payload["log"]))
+
+    def test_turns_parameter_skips_ahead_multiple_months(self):
+        cookie, _ = new_game("usa")
+        status, _, payload = call("POST", "/api/order", {"text": "pass", "turns": 3}, cookie=cookie)
+        self.assertEqual(status, "200 OK")
+        self.assertEqual(payload["turn"], 3)
+        # The digest should include events from all 3 months, not just the last.
+        self.assertGreater(len(payload["log"]), 0)
+
+    def test_invalid_turns_parameter_falls_back_to_one(self):
+        cookie, _ = new_game("usa")
+        status, _, payload = call("POST", "/api/order", {"text": "pass", "turns": "banana"}, cookie=cookie)
+        self.assertEqual(status, "200 OK")
+        self.assertEqual(payload["turn"], 1)
+
     def test_missing_text_and_index_is_rejected(self):
         cookie, _ = new_game("usa")
         status, _, payload = call("POST", "/api/order", {}, cookie=cookie)

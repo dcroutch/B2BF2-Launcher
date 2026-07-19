@@ -140,7 +140,7 @@ VERB_RULES = (
     ),
     ("invest_sector", ("invest in", "boost", "develop", "fund", "grow the", "subsidize")),
     ("invest_economy", ("invest", "stimulate", "economic stimulus", "grow the economy")),
-    ("pass", ("do nothing", "wait", "hold position", "stand down")),
+    ("pass", ("pass", "do nothing", "wait", "hold position", "stand down")),
 )
 
 # Maps keywords about a *form of government* to a GOVERNMENT_TYPES value,
@@ -291,3 +291,27 @@ def parse_command(world: World, player_id: str, text: str) -> Order:
         return Order(player_id, matched_type, target_id)
 
     return Order(player_id, matched_type)
+
+
+# How multiple distinct instructions in one submission are separated --
+# newlines, semicolons, or the connector "and then" -- deliberately not a
+# bare "and", since that's also ordinary English inside a single action
+# ("surround Russia and institute a blockade" is one action, not two).
+_MULTI_INSTRUCTION_SPLIT = re.compile(r"[\n;]+|\band then\b", re.IGNORECASE)
+
+# A player queuing up a whole paragraph of "instructions" in one submission
+# is a mistake, not intent -- cap how many distinct orders one call to
+# parse_commands can produce for the same turn.
+MAX_ORDERS_PER_SUBMISSION = 6
+
+
+def parse_commands(world: World, player_id: str, text: str) -> list[Order]:
+    """Split free text into one or more separate instructions for the same
+    turn (e.g. "invest in energy; embargo Russia") and parse each with
+    parse_command. A single-instruction submission still goes through this
+    same path and returns a one-element list -- there's no separate
+    special case for it."""
+    parts = [p.strip() for p in _MULTI_INSTRUCTION_SPLIT.split(text) if p.strip()]
+    if not parts:
+        return [Order(player_id, "pass")]
+    return [parse_command(world, player_id, p) for p in parts[:MAX_ORDERS_PER_SUBMISSION]]

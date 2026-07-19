@@ -1,7 +1,7 @@
 import unittest
 
 from worldsim.orders import Order
-from worldsim.parser import parse_command
+from worldsim.parser import parse_command, parse_commands
 from worldsim.scenarios import default_world
 
 
@@ -187,6 +187,70 @@ class TestVerbConjugation(unittest.TestCase):
         )
         self.assertEqual(order.type, "impose_embargo")
         self.assertEqual(order.target_id, "russia")
+
+
+class TestPassRecognizesTheLiteralWord(unittest.TestCase):
+    def test_literal_pass_is_recognized(self):
+        # Regression: only "do nothing"/"wait"/"hold position"/"stand
+        # down" were recognized -- typing the literal word "pass" (an
+        # extremely natural way to skip a turn) fell through to a vague
+        # wildcard instead.
+        world = default_world(player_id="usa")
+        order = parse_command(world, "usa", "pass")
+        self.assertEqual(order.type, "pass")
+
+
+class TestParseCommands(unittest.TestCase):
+    """parse_commands splits one submission into several distinct orders
+    for the same turn, so a player can queue up multiple actions at once
+    instead of being limited to exactly one order per turn."""
+
+    def test_semicolon_separated_instructions_become_separate_orders(self):
+        world = default_world(player_id="china")
+        orders = parse_commands(world, "china", "invest in energy; embargo Russia")
+        self.assertEqual(len(orders), 2)
+        self.assertEqual(orders[0].type, "invest_sector")
+        self.assertEqual(orders[1].type, "impose_embargo")
+        self.assertEqual(orders[1].target_id, "russia")
+
+    def test_and_then_separated_instructions_become_separate_orders(self):
+        world = default_world(player_id="china")
+        orders = parse_commands(
+            world, "china", "invest in energy and then embargo Russia"
+        )
+        self.assertEqual(len(orders), 2)
+
+    def test_plain_and_within_one_instruction_is_not_split(self):
+        # "and" alone is ordinary English inside a single action -- only
+        # newlines/semicolons/"and then" separate distinct instructions.
+        world = default_world(player_id="china")
+        orders = parse_commands(
+            world, "china", "Surround Russia and institute a blockade"
+        )
+        self.assertEqual(len(orders), 1)
+
+    def test_every_order_is_locked_to_the_player(self):
+        world = default_world(player_id="usa")
+        orders = parse_commands(
+            world, "usa", "invest in energy; China declares war on Russia"
+        )
+        self.assertTrue(all(o.actor_id == "usa" for o in orders))
+
+    def test_single_instruction_still_returns_a_one_element_list(self):
+        world = default_world(player_id="usa")
+        orders = parse_commands(world, "usa", "invest in energy")
+        self.assertEqual(len(orders), 1)
+
+    def test_empty_input_falls_back_to_pass(self):
+        world = default_world(player_id="usa")
+        orders = parse_commands(world, "usa", "   ")
+        self.assertEqual(orders, [Order("usa", "pass")])
+
+    def test_excess_instructions_are_capped(self):
+        world = default_world(player_id="usa")
+        text = "; ".join(["invest in energy"] * 20)
+        orders = parse_commands(world, "usa", text)
+        self.assertLessEqual(len(orders), 6)
 
 
 if __name__ == "__main__":

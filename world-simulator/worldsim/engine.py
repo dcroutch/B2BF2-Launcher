@@ -350,3 +350,33 @@ def game_status(world: World, player_id: str) -> Optional[str]:
     if len(alive_main) == 1 and alive_main[0].id == player_id:
         return "win"
     return None
+
+
+# One turn represents one month. This is purely a labeling/UI concept --
+# nothing in the engine's math depends on it -- but it's what lets a
+# "skip ahead 3 turns" request be presented to the player as "skip ahead
+# 3 months."
+TURN_LENGTH_MONTHS = 1
+
+
+def advance_turns(
+    world: World, player_id: str, player_orders: list[Order], num_turns: int, rng: random.Random
+) -> list[str]:
+    """Resolve `player_orders` (the player may submit several at once, e.g.
+    "invest in energy" + "embargo Russia" in the same turn) on the first
+    turn, then run `num_turns - 1` further turns with no further player
+    input -- an implicit pass, exactly like sitting out a turn -- so the
+    player can ask to skip ahead several months at once instead of being
+    stopped for input every single turn. AI nations keep acting normally
+    throughout. Returns every event_log line produced across all the turns
+    advanced, so the caller can show one combined digest instead of only
+    the last turn's events; stops early (returning however many turns it
+    actually got through) the moment game_status stops being None, since
+    there's no point simulating further turns once the game has ended."""
+    start_cursor = len(world.event_log)
+    run_turn(world, player_orders, rng)
+    for _ in range(max(0, num_turns - 1)):
+        if game_status(world, player_id) is not None:
+            break
+        run_turn(world, [Order(player_id, "pass")], rng)
+    return world.event_log[start_cursor:]

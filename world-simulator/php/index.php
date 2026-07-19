@@ -19,8 +19,9 @@
   #log { border: 1px solid #8884; border-radius: 8px; padding: 0.75rem; height: 220px; overflow-y: auto; font-family: monospace; font-size: 0.85rem; margin: 1rem 0; }
   #log div { margin-bottom: 2px; }
   #others { border: 1px solid #8884; border-radius: 8px; padding: 0.75rem; margin: 1rem 0; font-size: 0.85rem; }
-  #orderRow { display: flex; gap: 0.5rem; margin: 1rem 0; }
-  #orderText { flex: 1; }
+  #orderRow { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; align-items: flex-start; }
+  #orderText { flex: 1; min-width: 240px; font-family: inherit; resize: vertical; }
+  #skipLabel { font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.2rem; }
   #menuList { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0; }
   #menuList button { font-size: 0.8rem; padding: 0.3rem 0.6rem; }
   #verdict { font-size: 1.4rem; font-weight: 700; text-align: center; padding: 1rem; }
@@ -29,7 +30,7 @@
 </head>
 <body>
 <h1>Concert of Nations</h1>
-<p class="sub">A deterministic, offline geopolitical strategy sim &mdash; no AI/LLM. No turn cap: play until you win, lose, or quit. (PHP edition &mdash; runs on any shared host, no shell access needed.)</p>
+<p class="sub">A deterministic, offline geopolitical strategy sim &mdash; no AI/LLM. No turn cap: play until you win, lose, or quit. Each turn represents one month. (PHP edition &mdash; runs on any shared host, no shell access needed.)</p>
 
 <div id="setup" class="active">
   <label>Choose your nation:
@@ -44,7 +45,14 @@
   <div id="others"></div>
   <div id="log"></div>
   <div id="orderRow">
-    <input id="orderText" type="text" placeholder="What does your nation do? e.g. 'invade Iran', 'invest in technology'">
+    <textarea id="orderText" rows="2" placeholder="What does your nation do? Separate multiple instructions with ';' or a new line, e.g. 'invest in technology; embargo Russia'"></textarea>
+    <label id="skipLabel">Skip ahead
+      <select id="skipTurns">
+        <option value="1" selected>1 month</option>
+        <option value="3">3 months</option>
+        <option value="6">6 months</option>
+      </select>
+    </label>
     <button id="sendBtn">Send</button>
     <button id="menuBtn">Menu</button>
     <button id="quitBtn">Quit</button>
@@ -83,14 +91,18 @@ document.getElementById('startBtn').onclick = async () => {
 };
 
 document.getElementById('sendBtn').onclick = () => sendOrder();
-document.getElementById('orderText').addEventListener('keydown', e => { if (e.key === 'Enter') sendOrder(); });
+// Enter submits; Shift+Enter inserts a newline (for a second instruction).
+document.getElementById('orderText').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendOrder(); }
+});
 
 async function sendOrder() {
   const text = document.getElementById('orderText').value.trim();
   if (!text) return;
+  const turns = parseInt(document.getElementById('skipTurns').value, 10);
   document.getElementById('orderText').value = '';
   document.getElementById('menuList').innerHTML = '';
-  const state = await api('order', { text });
+  const state = await api('order', { text, turns });
   render(state);
 }
 
@@ -101,7 +113,8 @@ document.getElementById('menuBtn').onclick = async () => {
   list.querySelectorAll('button').forEach(btn => {
     btn.onclick = async () => {
       list.innerHTML = '';
-      const state = await api('order', { index: parseInt(btn.dataset.i, 10) });
+      const turns = parseInt(document.getElementById('skipTurns').value, 10);
+      const state = await api('order', { index: parseInt(btn.dataset.i, 10), turns });
       render(state);
     };
   });
@@ -118,10 +131,10 @@ function render(state) {
   if (state.error) { alert(state.error); return; }
   const p = state.player;
   document.getElementById('turnHeader').textContent =
-    `Turn ${state.turn} — ${p.name} (${p.government_type})`;
+    `Month ${state.turn} — ${p.name} (${p.government_type})`;
 
   const electionText = p.turns_to_election === null ? 'no elections (authoritarian)'
-    : `next election in ${p.turns_to_election} turn(s)`;
+    : `next election in ${p.turns_to_election} month(s)`;
 
   document.getElementById('stats').innerHTML = `
     <div class="stat"><div class="label">Stability</div><div class="value">${p.stability}</div></div>

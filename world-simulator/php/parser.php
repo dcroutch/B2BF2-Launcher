@@ -35,7 +35,7 @@ const VERB_RULES = [
     ]],
     ['invest_sector', ['invest in', 'boost', 'develop', 'fund', 'grow the', 'subsidize']],
     ['invest_economy', ['invest', 'stimulate', 'economic stimulus', 'grow the economy']],
-    ['pass', ['do nothing', 'wait', 'hold position', 'stand down']],
+    ['pass', ['pass', 'do nothing', 'wait', 'hold position', 'stand down']],
 ];
 
 const GOVERNMENT_ALIASES = [
@@ -241,4 +241,31 @@ function parse_command(array $world, string $playerId, string $text): array {
     }
 
     return make_order($playerId, $matchedType);
+}
+
+// How multiple distinct instructions in one submission are separated --
+// newlines, semicolons, or the connector "and then" -- deliberately not a
+// bare "and", since that's also ordinary English inside a single action
+// ("surround Russia and institute a blockade" is one action, not two).
+const MULTI_INSTRUCTION_SPLIT = '/[\n;]+|\band then\b/ui';
+
+// A player queuing up a whole paragraph of "instructions" in one
+// submission is a mistake, not intent -- cap how many distinct orders one
+// call to parse_commands can produce for the same turn.
+const MAX_ORDERS_PER_SUBMISSION = 6;
+
+// Split free text into one or more separate instructions for the same
+// turn (e.g. "invest in energy; embargo Russia") and parse each with
+// parse_command. A single-instruction submission still goes through this
+// same path and returns a one-element array.
+function parse_commands(array $world, string $playerId, string $text): array {
+    $parts = array_values(array_filter(
+        array_map('trim', preg_split(MULTI_INSTRUCTION_SPLIT, $text)),
+        fn($p) => $p !== ''
+    ));
+    if (!$parts) {
+        return [make_order($playerId, 'pass')];
+    }
+    $parts = array_slice($parts, 0, MAX_ORDERS_PER_SUBMISSION);
+    return array_map(fn($p) => parse_command($world, $playerId, $p), $parts);
 }

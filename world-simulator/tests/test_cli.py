@@ -6,7 +6,11 @@ from worldsim.cli import main
 
 class TestVoluntaryQuit(unittest.TestCase):
     def test_quit_command_ends_the_session_without_a_win_or_loss_verdict(self):
-        inputs = iter(["usa", "pass", "pass", "quit"])
+        # Each order submission is now followed by a "skip ahead how many
+        # months?" prompt (answered "1" here to advance one turn at a
+        # time, same as before this feature existed) -- quit itself needs
+        # no such follow-up since it returns before that prompt is shown.
+        inputs = iter(["usa", "pass", "1", "pass", "1", "quit"])
         with patch("builtins.input", lambda *a: next(inputs)):
             with patch("builtins.print") as mock_print:
                 main()  # should return cleanly, not raise or hang
@@ -37,7 +41,7 @@ class TestVoluntaryQuit(unittest.TestCase):
         # survive 150 turns of doing nothing but 'pass': the point here is
         # proving the *turn-cap removal*, not exercising randomness, which
         # is covered separately by test_engine's determinism/no-cap tests.
-        inputs = iter(["usa"] + ["pass"] * 150)
+        inputs = iter(["usa"] + ["pass", "1"] * 150)
         with patch("worldsim.cli.secrets.randbelow", return_value=0):
             with patch("builtins.input", lambda *a: next(inputs)):
                 with patch("builtins.print") as mock_print:
@@ -47,7 +51,7 @@ class TestVoluntaryQuit(unittest.TestCase):
                         pass  # ran out of scripted 'pass' input -- fine, not a cap
         printed = "\n".join(str(c.args[0]) if c.args else "" for c in mock_print.call_args_list)
         self.assertTrue(
-            any(f"Turn {t} " in printed for t in range(100, 151)),
+            any(f"Month {t} —" in printed for t in range(100, 151)),
             "expected the game to have advanced past the old 100-turn cap",
         )
 
