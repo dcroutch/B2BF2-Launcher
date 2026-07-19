@@ -21,30 +21,30 @@ def make_world(**overrides):
 class TestScheduledElections(unittest.TestCase):
     def test_popular_incumbent_is_reelected(self):
         world = make_world(a={"public_opinion": 70, "government_type": "democracy", "election_due_turn": 0})
-        _resolve_elections(world)
+        _resolve_elections(world, random.Random(1))
         self.assertTrue(world.get("a").in_power)
         self.assertGreater(world.get("a").election_due_turn, 0)
 
     def test_unpopular_player_loses_the_election(self):
         world = make_world(a={"public_opinion": 20, "government_type": "democracy", "election_due_turn": 0, "is_player": True})
-        _resolve_elections(world)
+        _resolve_elections(world, random.Random(1))
         self.assertFalse(world.get("a").in_power)
 
     def test_unpopular_ai_nation_gets_a_new_administration_not_removed_from_play(self):
         world = make_world(a={"public_opinion": 20, "government_type": "democracy", "election_due_turn": 0, "is_player": False})
-        _resolve_elections(world)
+        _resolve_elections(world, random.Random(1))
         self.assertTrue(world.get("a").in_power)
         self.assertTrue(world.get("a").alive)
         self.assertGreater(world.get("a").public_opinion, 20)
 
     def test_authoritarian_government_never_holds_a_real_election(self):
         world = make_world(a={"public_opinion": 5, "government_type": "authoritarian", "election_due_turn": 0, "is_player": True})
-        _resolve_elections(world)
+        _resolve_elections(world, random.Random(1))
         self.assertTrue(world.get("a").in_power)  # no election to lose
 
     def test_election_loss_ends_the_game_for_the_player(self):
         world = make_world(a={"public_opinion": 10, "government_type": "democracy", "election_due_turn": 0, "is_player": True})
-        _resolve_elections(world)
+        _resolve_elections(world, random.Random(1))
         self.assertEqual(game_status(world, "a"), "loss")
 
 
@@ -54,7 +54,7 @@ class TestNoConfidenceVote(unittest.TestCase):
             "government_type": "parliamentary", "public_opinion": 5, "stability": 10,
             "election_due_turn": 999, "is_player": True,
         })
-        _resolve_elections(world)
+        _resolve_elections(world, random.Random(1))
         self.assertFalse(world.get("a").in_power)
 
     def test_presidential_democracy_cannot_be_no_confidence_voted_out(self):
@@ -64,7 +64,7 @@ class TestNoConfidenceVote(unittest.TestCase):
             "government_type": "democracy", "public_opinion": 5, "stability": 10,
             "election_due_turn": 999, "is_player": True,
         })
-        _resolve_elections(world)
+        _resolve_elections(world, random.Random(1))
         self.assertTrue(world.get("a").in_power)
 
     def test_mild_unpopularity_does_not_trigger_no_confidence(self):
@@ -72,7 +72,7 @@ class TestNoConfidenceVote(unittest.TestCase):
             "government_type": "parliamentary", "public_opinion": 40, "stability": 50,
             "election_due_turn": 999, "is_player": True,
         })
-        _resolve_elections(world)
+        _resolve_elections(world, random.Random(1))
         self.assertTrue(world.get("a").in_power)
 
 

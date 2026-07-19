@@ -10,6 +10,24 @@ from typing import Optional
 
 from .models import ELECTION_TERM_LENGTH, GOVERNMENT_TYPES, SECTOR_COMMODITY, SECTOR_TYPES, STAT_MAX, World
 
+
+def _pick_variant(options: tuple, *seed_parts) -> str:
+    """Deterministically pick one of several equivalent phrasings for the
+    same event, so the same kind of thing happening over and over (a trade
+    pact, a sector investment, an election) doesn't read as the identical
+    canned sentence every time -- without needing an RNG threaded through
+    every resolver (there isn't one available here) and without breaking
+    determinism (Python's builtin hash() is salted per-process by default,
+    which would make "the same seed replays identically" false; this uses
+    a stable, order-dependent sum instead)."""
+    if len(options) == 1:
+        return options[0]
+    total = 0
+    for part in seed_parts:
+        for ch in str(part):
+            total = (total * 31 + ord(ch)) % 1_000_003
+    return options[total % len(options)]
+
 ORDER_TYPES = (
     "pass",
     "build_military",
@@ -200,6 +218,17 @@ EMBARGO_SOLIDARITY_RELATION_HIT = -8
 RIVAL_BLOC_WARINESS_HIT = -3
 RIVAL_BLOC_THRESHOLD = -30
 
+DEFENSE_PACT_MESSAGES = (
+    "{o} invokes its defense pact with {t} and joins the war against {a}.",
+    "Honoring its treaty with {t}, {o} enters the war against {a}.",
+    "{o} answers the call of its alliance with {t}, declaring war on {a}.",
+)
+ALLY_BACKING_MESSAGES = (
+    "{o} backs its ally {a} against {t}.",
+    "{o} voices support for {a} in the standoff with {t}.",
+    "{o} throws its diplomatic weight behind {a} against {t}.",
+)
+
 
 def _shift_relations(actor, target, delta: float) -> None:
     """Apply a mutual relation delta between two nations and clamp both
@@ -244,13 +273,14 @@ def _react_third_parties(world: World, actor, target, event: str) -> None:
             if target.id in other.alliances:
                 _shift_relations(other, actor, ALLY_SOLIDARITY_RELATION_HIT)
                 _enter_war(world, other, actor)
-                world.log(
-                    f"{other.name} invokes its defense pact with {target.name} "
-                    f"and joins the war against {actor.name}."
-                )
+                world.log(_pick_variant(DEFENSE_PACT_MESSAGES, world.turn, other.id, actor.id).format(
+                    o=other.name, t=target.name, a=actor.name
+                ))
             elif actor.id in other.alliances:
                 _shift_relations(other, target, ALLY_BACKING_RELATION_HIT)
-                world.log(f"{other.name} backs its ally {actor.name} against {target.name}.")
+                world.log(_pick_variant(ALLY_BACKING_MESSAGES, world.turn, other.id, target.id).format(
+                    o=other.name, a=actor.name, t=target.name
+                ))
 
         elif event == "embargo":
             if target.id in other.alliances:
@@ -262,9 +292,42 @@ def _react_third_parties(world: World, actor, target, event: str) -> None:
                 _shift_relations(other, target, RIVAL_BLOC_WARINESS_HIT)
 
 
+PASS_MESSAGES = (
+    "{a} holds steady, making no major moves this month.",
+    "{a}'s government stays the course, taking no significant action.",
+    "{a} spends the month on routine governance, nothing eventful.",
+)
+BUILD_MILITARY_MESSAGES = (
+    "{a} expands its armed forces.",
+    "{a} ramps up military production.",
+    "{a} funnels fresh spending into its armed forces.",
+)
+INVEST_ECONOMY_MESSAGES = (
+    "{a} rolls out an economic stimulus package.",
+    "{a} pours investment into its economy.",
+    "{a}'s government moves to shore up its economy.",
+)
+IMPROVE_RELATIONS_MESSAGES = (
+    "{a} extends a diplomatic overture toward {t}.",
+    "{a} works to warm relations with {t}.",
+    "{a} sends a goodwill delegation to {t}.",
+)
+INVEST_SECTOR_MESSAGES = (
+    "{a} invests in its {s} sector.",
+    "{a} pours resources into developing its {s} sector.",
+    "{a} announces a push to modernize its {s} sector.",
+)
+
+
 def _resolve_pass(world: World, order: Order) -> None:
+    # Bug fix: this used to produce zero log output at all -- the most
+    # common possible order (an empty turn, or the implicit pass used by
+    # advance_turns while skipping ahead) left no trace whatsoever that
+    # anything had happened, which read as the game simply ignoring the
+    # player.
     actor = world.get(order.actor_id)
     actor.stability += 1
+    world.log(_pick_variant(PASS_MESSAGES, world.turn, actor.id).format(a=actor.name))
 
 
 def _resolve_build_military(world: World, order: Order) -> None:
@@ -276,14 +339,21 @@ def _resolve_build_military(world: World, order: Order) -> None:
     # military the nation can actually still gain.
     room = max(0.0, STAT_MAX - actor.military)
     if room <= 0.0:
-        world.log(f"{actor.name}'s military is already at full strength; the buildup has nowhere to go.")
+        world.log(_pick_variant(BUILD_MILITARY_FULL_MESSAGES, world.turn, actor.id).format(a=actor.name))
         return
     spend = min(15.0, actor.economy * 0.2, room / 1.2)
     actor.economy -= spend
     actor.military += spend * 1.2
+    # Bug fix: the normal (not-already-at-cap) case used to produce zero
+    # log output at all, unlike every other order type -- the player would
+    # spend economy on a military buildup and see no confirmation of it.
+    world.log(_pick_variant(BUILD_MILITARY_MESSAGES, world.turn, actor.id).format(a=actor.name))
 
 
 def _resolve_invest_economy(world: World, order: Order) -> None:
+    # Bug fix: this used to produce zero log output at all -- one of the
+    # most commonly issued orders left no confirmation whatsoever that it
+    # had happened.
     actor = world.get(order.actor_id)
     actor.economy += 5 + actor.resources.get("energy", 0) * 0.02
     actor.stability += 0.5
@@ -291,6 +361,7 @@ def _resolve_invest_economy(world: World, order: Order) -> None:
     # its current economy -- otherwise every nation eventually converges on
     # the same global cap regardless of how much it actually invested.
     actor.economic_potential += 0.6
+    world.log(_pick_variant(INVEST_ECONOMY_MESSAGES, world.turn, actor.id).format(a=actor.name))
 
 
 def _resolve_invest_sector(world: World, order: Order) -> None:
@@ -316,7 +387,9 @@ def _resolve_invest_sector(world: World, order: Order) -> None:
     if commodity:
         actor.resources[commodity] = actor.resources.get(commodity, 0.0) + 5
     sector_label = sector.replace("_sector", "").replace("_", " ")
-    world.log(f"{actor.name} invests in its {sector_label} sector.")
+    world.log(_pick_variant(INVEST_SECTOR_MESSAGES, world.turn, actor.id, sector).format(
+        a=actor.name, s=sector_label
+    ))
 
 
 CONSTITUTION_COUP_OPINION_HIT = -25
@@ -325,6 +398,39 @@ CONSTITUTION_COUP_RELATION_HIT = -12
 CONSTITUTION_LIBERALIZATION_OPINION_BOOST = 15
 CONSTITUTION_TRANSITION_STABILITY_HIT = -5
 CONSTITUTION_REFORM_OPINION_DELTA = 3
+
+COUP_MESSAGES = (
+    "{a} abolishes its {old} constitution and imposes {new} rule.",
+    "In a sudden power grab, {a} scraps its {old} constitution for {new} rule.",
+)
+LIBERALIZATION_MESSAGES = (
+    "{a} adopts a {new} constitution and schedules elections.",
+    "{a} turns toward {new} governance, announcing a new constitution and elections.",
+)
+CONSTITUTION_REFORM_MESSAGES = (
+    "{a} reforms its constitution from {old} to {new}.",
+    "{a} restructures its government, moving from {old} to {new}.",
+)
+BUILD_MILITARY_FULL_MESSAGES = (
+    "{a}'s military is already at full strength; the buildup has nowhere to go.",
+    "{a}'s armed forces are already at their peak; further spending would be wasted.",
+)
+ANNEX_MESSAGES = (
+    "{a} annexes {t} outright, absorbing its territory and population.",
+    "{a} formally annexes the defeated {t}, folding it into its own territory.",
+)
+ANNEX_FAILED_MESSAGES = (
+    "{a} attempts to annex {t}, but its forces haven't been crushed decisively enough.",
+    "{a} presses for annexation of {t}, but the war hasn't been decided yet.",
+)
+ACCESSION_REJECTED_MESSAGES = (
+    "{a}'s population votes against joining {t}; ties remain close but sovereign.",
+    "{a} narrowly rejects union with {t} at the ballot box, remaining independent.",
+)
+ACCESSION_MESSAGES = (
+    "{a} votes to join {t} in a peaceful union.",
+    "{a}'s population votes to dissolve into {t} in a peaceful union.",
+)
 
 
 def _resolve_modify_constitution(world: World, order: Order) -> None:
@@ -345,7 +451,7 @@ def _resolve_modify_constitution(world: World, order: Order) -> None:
         # A coup: abolishing elected government for authoritarian rule.
         actor.public_opinion += CONSTITUTION_COUP_OPINION_HIT
         actor.stability += CONSTITUTION_COUP_STABILITY_HIT
-        world.log(f"{actor.name} abolishes its {old_type} constitution and imposes {new_type} rule.")
+        world.log(_pick_variant(COUP_MESSAGES, world.turn, actor.id).format(a=actor.name, old=old_type, new=new_type))
         condemners = 0
         for other in world.alive_nations():
             if other.id == actor.id:
@@ -360,19 +466,61 @@ def _resolve_modify_constitution(world: World, order: Order) -> None:
         actor.public_opinion += CONSTITUTION_LIBERALIZATION_OPINION_BOOST
         actor.stability += CONSTITUTION_TRANSITION_STABILITY_HIT
         actor.election_due_turn = world.turn + ELECTION_TERM_LENGTH
-        world.log(f"{actor.name} adopts a {new_type} constitution and schedules elections.")
+        world.log(_pick_variant(LIBERALIZATION_MESSAGES, world.turn, actor.id).format(a=actor.name, new=new_type))
     else:
         # A reform between two elected systems (democracy <-> parliamentary).
         actor.public_opinion += CONSTITUTION_REFORM_OPINION_DELTA
-        world.log(f"{actor.name} reforms its constitution from {old_type} to {new_type}.")
+        world.log(_pick_variant(CONSTITUTION_REFORM_MESSAGES, world.turn, actor.id).format(a=actor.name, old=old_type, new=new_type))
 
     actor.government_type = new_type
 
 
 def _resolve_improve_relations(world: World, order: Order) -> None:
+    # Bug fix: this used to produce zero log output at all -- a targeted,
+    # deliberate diplomatic order left no confirmation it had happened.
     actor = world.get(order.actor_id)
     target = world.get(order.target_id)
     _shift_relations(actor, target, 8)
+    world.log(_pick_variant(IMPROVE_RELATIONS_MESSAGES, world.turn, actor.id, target.id).format(
+        a=actor.name, t=target.name
+    ))
+
+
+ALLIANCE_MESSAGES = (
+    "{a} and {t} form an alliance.",
+    "{a} and {t} sign a mutual defense pact.",
+    "{a} and {t} formally align, pledging to defend one another.",
+)
+BREAK_ALLIANCE_MESSAGES = (
+    "{a} breaks its alliance with {t}.",
+    "{a} renounces its treaty with {t}.",
+    "{a} walks away from its alliance with {t}, straining ties.",
+)
+TRADE_PACT_MESSAGES = (
+    "{a} and {t} sign a trade pact.",
+    "{a} and {t} open new trade channels.",
+    "{a} and {t} strike a fresh trade agreement.",
+)
+EMBARGO_MESSAGES = (
+    "{a} imposes an embargo on {t}.",
+    "{a} moves to economically isolate {t}.",
+    "{a} cuts off trade with {t} in a new embargo.",
+)
+DECLARE_WAR_MESSAGES = (
+    "{a} declares war on {t}!",
+    "{a} launches an offensive against {t}!",
+    "War breaks out as {a} attacks {t}!",
+)
+CEASEFIRE_MESSAGES = (
+    "{a} and {t} agree to a ceasefire.",
+    "{a} and {t} reach a truce, ending the fighting for now.",
+    "Exhausted, {a} and {t} lay down arms in a ceasefire.",
+)
+PEACE_REJECTED_MESSAGES = (
+    "{t} presses its advantage and rejects {a}'s peace offer.",
+    "{t} refuses {a}'s peace overture, sensing victory within reach.",
+    "{t} presses on, spurning {a}'s bid for peace.",
+)
 
 
 def _resolve_propose_alliance(world: World, order: Order) -> None:
@@ -383,7 +531,7 @@ def _resolve_propose_alliance(world: World, order: Order) -> None:
         target.alliances.add(actor.id)
         actor.public_opinion += ALLIANCE_OPINION_BOOST
         target.public_opinion += ALLIANCE_OPINION_BOOST
-        world.log(f"{actor.name} and {target.name} form an alliance.")
+        world.log(_pick_variant(ALLIANCE_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
         _react_third_parties(world, actor, target, "alliance")
 
 
@@ -394,7 +542,7 @@ def _resolve_break_alliance(world: World, order: Order) -> None:
         actor.alliances.discard(target.id)
         target.alliances.discard(actor.id)
         _shift_relations(actor, target, BREAK_ALLIANCE_RELATION_HIT)
-        world.log(f"{actor.name} breaks its alliance with {target.name}.")
+        world.log(_pick_variant(BREAK_ALLIANCE_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
 
 
 def _resolve_trade_pact(world: World, order: Order) -> None:
@@ -403,7 +551,7 @@ def _resolve_trade_pact(world: World, order: Order) -> None:
     if actor.relation(target.id) >= 0 and target.relation(actor.id) >= 0:
         actor.trade_pacts.add(target.id)
         target.trade_pacts.add(actor.id)
-        world.log(f"{actor.name} and {target.name} sign a trade pact.")
+        world.log(_pick_variant(TRADE_PACT_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
 
 
 def _resolve_impose_embargo(world: World, order: Order) -> None:
@@ -414,7 +562,7 @@ def _resolve_impose_embargo(world: World, order: Order) -> None:
     target.trade_pacts.discard(actor.id)
     _shift_relations(actor, target, EMBARGO_RELATION_HIT)
     target.public_opinion += EMBARGO_RECEIVED_OPINION_HIT
-    world.log(f"{actor.name} imposes an embargo on {target.name}.")
+    world.log(_pick_variant(EMBARGO_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
     _react_third_parties(world, actor, target, "embargo")
 
 
@@ -434,7 +582,7 @@ def _resolve_declare_war(world: World, order: Order) -> None:
         WAR_OPINION_HIT_JUSTIFIED if pre_war_hostility <= -50 else WAR_OPINION_HIT_UNPROVOKED
     )
     target.public_opinion += RALLY_AROUND_FLAG_OPINION_BOOST
-    world.log(f"{actor.name} declares war on {target.name}!")
+    world.log(_pick_variant(DECLARE_WAR_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
     _react_third_parties(world, actor, target, "war")
 
 
@@ -464,9 +612,9 @@ def _resolve_sue_for_peace(world: World, order: Order) -> None:
         losing = actor.military < target.military * 0.8
         actor.public_opinion += PEACE_HUMILIATION_OPINION_HIT if losing else PEACE_RELIEF_OPINION_BOOST
         target.public_opinion += PEACE_RELIEF_OPINION_BOOST
-        world.log(f"{actor.name} and {target.name} agree to a ceasefire.")
+        world.log(_pick_variant(CEASEFIRE_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
     else:
-        world.log(f"{target.name} presses its advantage and rejects {actor.name}'s peace offer.")
+        world.log(_pick_variant(PEACE_REJECTED_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
 
 
 # Sovereignty changes: a nation ceasing to exist as an independent actor,
@@ -530,10 +678,10 @@ def _resolve_annex(world: World, order: Order) -> None:
     if target.id not in actor.at_war_with:
         return
     if not _is_annex_eligible(actor, target):
-        world.log(f"{actor.name} attempts to annex {target.name}, but its forces haven't been crushed decisively enough.")
+        world.log(_pick_variant(ANNEX_FAILED_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
         return
     absorb_nation(world, actor, target, peaceful=False)
-    world.log(f"{actor.name} annexes {target.name} outright, absorbing its territory and population.")
+    world.log(_pick_variant(ANNEX_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
 
 
 def _resolve_propose_accession(world: World, order: Order) -> None:
@@ -541,10 +689,10 @@ def _resolve_propose_accession(world: World, order: Order) -> None:
     target = world.get(order.target_id)  # absorbs actor
     mutual_relation = min(actor.relation(target.id), target.relation(actor.id))
     if mutual_relation < ACCESSION_RELATION_THRESHOLD:
-        world.log(f"{actor.name}'s population votes against joining {target.name}; ties remain close but sovereign.")
+        world.log(_pick_variant(ACCESSION_REJECTED_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
         return
     absorb_nation(world, target, actor, peaceful=True)
-    world.log(f"{actor.name} votes to join {target.name} in a peaceful union.")
+    world.log(_pick_variant(ACCESSION_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
 
 
 # A lightweight, deterministic sentiment lexicon -- not a language model,

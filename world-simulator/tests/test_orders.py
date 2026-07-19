@@ -94,6 +94,36 @@ class TestBackgroundNationLegality(unittest.TestCase):
         self.assertNotIn("bg", targets)
 
 
+class TestEveryOrderProducesLogFeedback(unittest.TestCase):
+    """Regression tests: pass, build_military (under the military cap),
+    invest_economy, and improve_relations used to produce zero log output
+    at all -- unlike every other order type, the player got no
+    confirmation whatsoever that these (some of the most commonly issued)
+    orders had happened, which read as the game ignoring their input."""
+
+    def _resolve_and_get_new_log_lines(self, order):
+        world = make_world()
+        before = len(world.event_log)
+        resolve_orders(world, [order])
+        return world.event_log[before:]
+
+    def test_pass_produces_a_log_line(self):
+        lines = self._resolve_and_get_new_log_lines(Order("a", "pass"))
+        self.assertTrue(lines)
+
+    def test_build_military_under_cap_produces_a_log_line(self):
+        lines = self._resolve_and_get_new_log_lines(Order("a", "build_military"))
+        self.assertTrue(lines)
+
+    def test_invest_economy_produces_a_log_line(self):
+        lines = self._resolve_and_get_new_log_lines(Order("a", "invest_economy"))
+        self.assertTrue(lines)
+
+    def test_improve_relations_produces_a_log_line(self):
+        lines = self._resolve_and_get_new_log_lines(Order("a", "improve_relations", "b"))
+        self.assertTrue(lines)
+
+
 class TestResolveOrders(unittest.TestCase):
     def test_declare_war_sets_mutual_war_state(self):
         world = make_world()

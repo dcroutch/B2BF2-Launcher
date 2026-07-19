@@ -10,6 +10,45 @@ const NO_CONFIDENCE_OPINION_THRESHOLD = 15.0;
 const NO_CONFIDENCE_STABILITY_THRESHOLD = 25.0;
 const NEW_ADMINISTRATION_OPINION = 55.0;
 
+// Equivalent phrasings for the same kind of event, so frequent occurrences
+// (an election, a minor event, a rebel fracture) don't always read as the
+// identical canned sentence. See orders.php's pick_variant().
+const REELECTED_MESSAGES = [
+    "{n} holds elections; the incumbent government is re-elected.",
+    "{n} goes to the polls; voters return the incumbent government to power.",
+    "{n}'s government wins another term in a scheduled election.",
+];
+const VOTED_OUT_MESSAGES = [
+    "{n} holds elections; the incumbent government is voted out of office.",
+    "{n} goes to the polls; voters oust the incumbent government.",
+    "{n}'s government loses power in a scheduled election.",
+];
+const NEW_ADMINISTRATION_MESSAGES = [
+    "A new administration takes power in {n}.",
+    "{n} swears in a new government.",
+    "A fresh administration takes the reins in {n}.",
+];
+const MINOR_EVENT_MESSAGE_TEMPLATES = [
+    "{n} experiences {e}.",
+    "{n} is affected by {e}.",
+    "Reports from {n} describe {e}.",
+];
+const CIVIL_WAR_MESSAGES = [
+    "{n} fractures under the strain: a rebel faction breaks away and declares independence!",
+    "Unable to hold together, {n} splinters as a rebel faction declares independence!",
+    "{n} descends into civil war as a breakaway faction declares independence!",
+];
+const COLLAPSE_ANNEX_MESSAGES = [
+    "{c} annexes the collapsed {n} amid war.",
+    "As {n} collapses, {c} moves in to absorb the wreckage.",
+    "{n}'s government falls apart mid-war, and {c} annexes what remains.",
+];
+const COLLAPSE_MESSAGES = [
+    "{n} collapses into instability and exits the world stage.",
+    "{n}'s government disintegrates entirely, and the state ceases to function.",
+    "{n} implodes under its own instability, its government gone.",
+];
+
 const MARKET_PRICE_ADJUST_RATE = 0.1;
 const MARKET_PRICE_MIN = 0.5;
 const MARKET_PRICE_MAX = 2.0;
@@ -142,7 +181,7 @@ function maybe_trigger_minor_event(array &$world, string $nationId): void {
         $n['resources'][$r] = ($n['resources'][$r] ?? 0.0) + rand_uniform($lo, $hi);
     }
     $label = str_replace('_', ' ', $name);
-    w_log($world, "{$n['name']} experiences $label.");
+    w_log($world, fill(pick_variant(MINOR_EVENT_MESSAGE_TEMPLATES, $world['turn'], $nationId, $name), ['n' => $n['name'], 'e' => $label]));
 }
 
 function maybe_trigger_civil_war(array &$world, string $nationId): void {
@@ -174,7 +213,7 @@ function maybe_trigger_civil_war(array &$world, string $nationId): void {
     clamp_nation($rebels);
     clamp_nation($n);
     spawn_nation($world, $rebels);
-    w_log($world, "{$n['name']} fractures under the strain: a rebel faction breaks away and declares independence!");
+    w_log($world, fill(pick_variant(CIVIL_WAR_MESSAGES, $world['turn'], $nationId), ['n' => $n['name']]));
 }
 
 function update_market_prices(array &$world): void {
@@ -213,9 +252,9 @@ function hold_election(array &$world, string $nationId): void {
     if ($nation['public_opinion'] >= ELECTION_WIN_OPINION_THRESHOLD) {
         $nation['election_due_turn'] = $world['turn'] + ELECTION_TERM_LENGTH;
         $nation['public_opinion'] = min(100.0, $nation['public_opinion'] + 3.0);
-        w_log($world, "{$nation['name']} holds elections; the incumbent government is re-elected.");
+        w_log($world, fill(pick_variant(REELECTED_MESSAGES, $world['turn'], $nationId), ['n' => $nation['name']]));
     } else {
-        w_log($world, "{$nation['name']} holds elections; the incumbent government is voted out of office.");
+        w_log($world, fill(pick_variant(VOTED_OUT_MESSAGES, $world['turn'], $nationId), ['n' => $nation['name']]));
         oust_leader($world, $nationId);
     }
 }
@@ -227,7 +266,7 @@ function oust_leader(array &$world, string $nationId): void {
     } else {
         $nation['public_opinion'] = NEW_ADMINISTRATION_OPINION;
         $nation['election_due_turn'] = $world['turn'] + ELECTION_TERM_LENGTH;
-        w_log($world, "A new administration takes power in {$nation['name']}.");
+        w_log($world, fill(pick_variant(NEW_ADMINISTRATION_MESSAGES, $world['turn'], $nationId), ['n' => $nation['name']]));
     }
 }
 
@@ -249,15 +288,16 @@ function check_collapses(array &$world): void {
             }
             if ($conquerorId !== null && $world['nations'][$conquerorId]['alive']) {
                 $collapsedName = $nation['name'];
+                $conquerorName = $world['nations'][$conquerorId]['name'];
                 absorb_nation($world, $conquerorId, $id, false);
-                w_log($world, "{$world['nations'][$conquerorId]['name']} annexes the collapsed $collapsedName amid war.");
+                w_log($world, fill(pick_variant(COLLAPSE_ANNEX_MESSAGES, $world['turn'], $conquerorId, $id), ['c' => $conquerorName, 'n' => $collapsedName]));
                 continue;
             }
         }
 
         $world['nations'][$id]['alive'] = false;
         purge_nation_references($world, $id);
-        w_log($world, "{$nation['name']} collapses into instability and exits the world stage.");
+        w_log($world, fill(pick_variant(COLLAPSE_MESSAGES, $world['turn'], $id), ['n' => $nation['name']]));
     }
 }
 

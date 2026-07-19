@@ -141,7 +141,7 @@ class TestCollapseDuringWarBecomesAnnexation(unittest.TestCase):
         world = make_world(a={"military": 90}, b={"military": 5, "stability": 0})
         world.get("a").at_war_with.add("b")
         world.get("b").at_war_with.add("a")
-        _check_collapses(world)
+        _check_collapses(world, random.Random(1))
         self.assertFalse(world.get("b").alive)
         self.assertTrue(world.get("a").alive)
 
@@ -153,13 +153,13 @@ class TestCollapseDuringWarBecomesAnnexation(unittest.TestCase):
         a.at_war_with.add("c")
         b.at_war_with.add("c")
         world = World(nations={"a": a, "b": b, "c": c})
-        _check_collapses(world)
+        _check_collapses(world, random.Random(1))
         self.assertFalse(world.get("c").alive)
         self.assertGreater(world.get("b").economy, 50.0)  # b (stronger) absorbed c
 
     def test_collapsing_without_a_war_still_just_vanishes(self):
         world = make_world(a={"stability": 0})
-        _check_collapses(world)
+        _check_collapses(world, random.Random(1))
         self.assertFalse(world.get("a").alive)
         self.assertTrue(world.get("b").alive)
         self.assertEqual(world.get("b").economy, 50.0)  # unaffected, no absorption
@@ -257,7 +257,7 @@ class TestConquerorTiebreakIsDeterministic(unittest.TestCase):
                 "b": Nation(id="b", name="B", military=50, at_war_with={"c"}),
                 "c": Nation(id="c", name="C", military=0, stability=0, at_war_with={"a", "b"}),
             })
-            _check_collapses(world)
+            _check_collapses(world, random.Random(1))
             self.assertFalse(world.get("c").alive)  # c is always annexed
             self.assertTrue(world.get("b").alive)  # b is never involved
             winners.add(world.get("a").economy)  # a grew iff it was the conqueror

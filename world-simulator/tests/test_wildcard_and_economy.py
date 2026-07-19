@@ -118,10 +118,15 @@ class TestSectorInvestment(unittest.TestCase):
             Order("a", "invest_sector", None, detail="not_a_real_sector")
 
     def test_energy_sector_log_message_does_not_double_the_word_sector(self):
+        # Not pinned to one exact phrasing -- invest_sector's log message
+        # is chosen from a small pool of equivalent variants (see
+        # orders._pick_variant) for immersion, but every variant is built
+        # around "{s} sector" and must render "energy sector", never the
+        # doubled "energy_sector sector".
         world = make_world()
         world.get("a").economy = 60
         resolve_orders(world, [Order("a", "invest_sector", None, detail="energy_sector")])
-        self.assertIn("invests in its energy sector.", world.event_log[-1])
+        self.assertIn("energy sector", world.event_log[-1])
         self.assertNotIn("sector sector", world.event_log[-1])
 
 

@@ -8,6 +8,47 @@ from .ai import choose_order
 from .models import ELECTION_TERM_LENGTH, RESOURCE_TYPES, SECTOR_TYPES, Nation, World
 from .orders import Order, absorb_nation, resolve_orders
 
+# Equivalent phrasings for the same kind of event, so frequent occurrences
+# (an election, a minor event, a rebel fracture) don't always read as the
+# identical canned sentence. engine.py has a seeded rng available to every
+# caller here (unlike orders.py's resolvers), so this just uses rng.choice
+# directly instead of orders._pick_variant's hash-based approach.
+REELECTED_MESSAGES = (
+    "{n} holds elections; the incumbent government is re-elected.",
+    "{n} goes to the polls; voters return the incumbent government to power.",
+    "{n}'s government wins another term in a scheduled election.",
+)
+VOTED_OUT_MESSAGES = (
+    "{n} holds elections; the incumbent government is voted out of office.",
+    "{n} goes to the polls; voters oust the incumbent government.",
+    "{n}'s government loses power in a scheduled election.",
+)
+NEW_ADMINISTRATION_MESSAGES = (
+    "A new administration takes power in {n}.",
+    "{n} swears in a new government.",
+    "A fresh administration takes the reins in {n}.",
+)
+MINOR_EVENT_MESSAGE_TEMPLATES = (
+    "{n} experiences {e}.",
+    "{n} is affected by {e}.",
+    "Reports from {n} describe {e}.",
+)
+CIVIL_WAR_MESSAGES = (
+    "{n} fractures under the strain: a rebel faction breaks away and declares independence!",
+    "Unable to hold together, {n} splinters as a rebel faction declares independence!",
+    "{n} descends into civil war as a breakaway faction declares independence!",
+)
+COLLAPSE_ANNEX_MESSAGES = (
+    "{c} annexes the collapsed {n} amid war.",
+    "As {n} collapses, {c} moves in to absorb the wreckage.",
+    "{n}'s government falls apart mid-war, and {c} annexes what remains.",
+)
+COLLAPSE_MESSAGES = (
+    "{n} collapses into instability and exits the world stage.",
+    "{n}'s government disintegrates entirely, and the state ceases to function.",
+    "{n} implodes under its own instability, its government gone.",
+)
+
 WAR_STABILITY_DRAIN = 2.0
 WAR_MILITARY_DRAIN = 1.5
 COLLAPSE_STABILITY = 0.0
@@ -95,8 +136,8 @@ def run_turn(world: World, player_orders: list[Order], rng: random.Random) -> No
     resolve_orders(world, all_orders)
     _apply_passive_effects(world, rng)
     _update_market_prices(world)
-    _resolve_elections(world)
-    _check_collapses(world)
+    _resolve_elections(world, rng)
+    _check_collapses(world, rng)
     world.turn += 1
 
 
@@ -197,7 +238,7 @@ def _maybe_trigger_minor_event(world: World, nation, rng: random.Random) -> None
     nation.public_opinion += rng.uniform(*opinion_range)
     for r, (lo, hi) in resource_ranges.items():
         nation.resources[r] = nation.resources.get(r, 0.0) + rng.uniform(lo, hi)
-    world.log(f"{nation.name} experiences {name.replace('_', ' ')}.")
+    world.log(rng.choice(MINOR_EVENT_MESSAGE_TEMPLATES).format(n=nation.name, e=name.replace("_", " ")))
 
 
 def _maybe_trigger_civil_war(world: World, nation, rng: random.Random) -> None:
@@ -235,7 +276,7 @@ def _maybe_trigger_civil_war(world: World, nation, rng: random.Random) -> None:
     rebels.clamp_stats()
     nation.clamp_stats()
     world.spawn_nation(rebels)
-    world.log(f"{nation.name} fractures under the strain: a rebel faction breaks away and declares independence!")
+    world.log(rng.choice(CIVIL_WAR_MESSAGES).format(n=nation.name))
 
 
 def _update_market_prices(world: World) -> None:
@@ -254,7 +295,7 @@ def _update_market_prices(world: World) -> None:
         world.market_prices[r] = current + (target_price - current) * MARKET_PRICE_ADJUST_RATE
 
 
-def _resolve_elections(world: World) -> None:
+def _resolve_elections(world: World, rng: random.Random) -> None:
     """Governments answer to their own domestic politics, independent of
     anything the player types about *other* nations (see parser.py's
     actor-lock guarantee -- nothing here can be triggered or skipped by
@@ -263,27 +304,27 @@ def _resolve_elections(world: World) -> None:
         if nation.government_type == "authoritarian" or nation.is_background:
             continue  # no real elections to hold or lose
         if world.turn >= nation.election_due_turn:
-            _hold_election(world, nation)
+            _hold_election(world, nation, rng)
         elif (
             nation.government_type == "parliamentary"
             and nation.public_opinion < NO_CONFIDENCE_OPINION_THRESHOLD
             and nation.stability < NO_CONFIDENCE_STABILITY_THRESHOLD
         ):
             world.log(f"{nation.name}'s parliament passes a vote of no confidence, collapsing the government.")
-            _oust_leader(world, nation)
+            _oust_leader(world, nation, rng)
 
 
-def _hold_election(world: World, nation) -> None:
+def _hold_election(world: World, nation, rng: random.Random) -> None:
     if nation.public_opinion >= ELECTION_WIN_OPINION_THRESHOLD:
         nation.election_due_turn = world.turn + ELECTION_TERM_LENGTH
         nation.public_opinion = min(100.0, nation.public_opinion + 3.0)
-        world.log(f"{nation.name} holds elections; the incumbent government is re-elected.")
+        world.log(rng.choice(REELECTED_MESSAGES).format(n=nation.name))
     else:
-        world.log(f"{nation.name} holds elections; the incumbent government is voted out of office.")
-        _oust_leader(world, nation)
+        world.log(rng.choice(VOTED_OUT_MESSAGES).format(n=nation.name))
+        _oust_leader(world, nation, rng)
 
 
-def _oust_leader(world: World, nation) -> None:
+def _oust_leader(world: World, nation, rng: random.Random) -> None:
     if nation.is_player:
         # The player's leadership loses power outright -- this is checked
         # by game_status() as a distinct end state from a stability collapse.
@@ -291,10 +332,10 @@ def _oust_leader(world: World, nation) -> None:
     else:
         nation.public_opinion = NEW_ADMINISTRATION_OPINION
         nation.election_due_turn = world.turn + ELECTION_TERM_LENGTH
-        world.log(f"A new administration takes power in {nation.name}.")
+        world.log(rng.choice(NEW_ADMINISTRATION_MESSAGES).format(n=nation.name))
 
 
-def _check_collapses(world: World) -> None:
+def _check_collapses(world: World, rng: random.Random) -> None:
     for nation in world.alive_nations():
         if nation.stability > COLLAPSE_STABILITY:
             continue
@@ -320,12 +361,12 @@ def _check_collapses(world: World) -> None:
             conqueror = world.nations.get(conqueror_id)
             if conqueror is not None and conqueror.alive:
                 absorb_nation(world, conqueror, nation, peaceful=False)
-                world.log(f"{conqueror.name} annexes the collapsed {nation.name} amid war.")
+                world.log(rng.choice(COLLAPSE_ANNEX_MESSAGES).format(c=conqueror.name, n=nation.name))
                 continue
 
         nation.alive = False
         world.purge_nation_references(nation.id)
-        world.log(f"{nation.name} collapses into instability and exits the world stage.")
+        world.log(rng.choice(COLLAPSE_MESSAGES).format(n=nation.name))
 
 
 def game_status(world: World, player_id: str) -> Optional[str]:
