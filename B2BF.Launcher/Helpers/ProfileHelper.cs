@@ -1,5 +1,4 @@
-﻿using B2BF.Common.Account;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -54,19 +53,24 @@ namespace B2BF.Launcher.Helpers
             }
         }
 
-        public static void CreateProfileIfNotExists()
+        /// <summary>
+        /// Not currently called - BF2's own native "create profile" screen handles this when no
+        /// profile exists. Kept as a standalone utility (takes the name explicitly rather than
+        /// reading a global account) in case a launcher-driven profile seed is wanted again later.
+        /// </summary>
+        public static void CreateProfileIfNotExists(string gamerName)
         {
-            if (!profileNames.Contains(AccountInfo.Username, StringComparer.Ordinal))
+            if (!profileNames.Contains(gamerName, StringComparer.Ordinal))
             {
                 highestProfileId++;
-                profileNames.Add(AccountInfo.Username);
+                profileNames.Add(gamerName);
                 var profilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Battlefield 2", "Profiles", highestProfileId.ToString().PadLeft(4, '0'));
                 Directory.CreateDirectory(profilePath);
 
                 var sb = new StringBuilder();
-                sb.AppendLine("LocalProfile.setName \"" + AccountInfo.Username + "\"");
-                sb.AppendLine("LocalProfile.setNick \"" + AccountInfo.Username + "\"");
-                sb.AppendLine("LocalProfile.setGamespyNick \"" + AccountInfo.Username + "\"");
+                sb.AppendLine("LocalProfile.setName \"" + gamerName + "\"");
+                sb.AppendLine("LocalProfile.setNick \"" + gamerName + "\"");
+                sb.AppendLine("LocalProfile.setGamespyNick \"" + gamerName + "\"");
                 sb.AppendLine("LocalProfile.setEmail \"private@b2bf.net\"");
 
                 File.WriteAllText(Path.Combine(profilePath, "Profile.con"), sb.ToString());

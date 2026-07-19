@@ -1,6 +1,7 @@
-﻿using B2BF.Common.Account;
+﻿using B2BF.Common.Data;
 using B2BF.Common.Models;
 using Newtonsoft.Json;
+using Sentry;
 using System.Timers;
 
 namespace B2BF.Common.Helpers
@@ -28,14 +29,14 @@ namespace B2BF.Common.Helpers
         {
             try
             {
-                _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccountInfo.AccessToken);
-                var str = await _httpClient.GetStringAsync("https://b2bf2.net/api/gamespy/servers");
+                var str = await _httpClient.GetStringAsync(Endpoints.ServerListUrl);
                 var serverList = JsonConvert.DeserializeObject<List<GameSpyServer>>(str);
 
-                Servers = serverList;
+                Servers = serverList ?? new List<GameSpyServer>();
             }
             catch (Exception ex)
             {
+                SentrySdk.CaptureException(ex);
             }
         }
 

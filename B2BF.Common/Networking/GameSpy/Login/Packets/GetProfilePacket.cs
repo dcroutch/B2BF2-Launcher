@@ -1,4 +1,4 @@
-﻿using B2BF.Common.Account;
+﻿using B2BF.Common.Data;
 
 namespace B2BF.Common.Networking.GameSpy.Login.Packets
 {
@@ -10,7 +10,7 @@ namespace B2BF.Common.Networking.GameSpy.Login.Packets
             loginClient.Send((string.Format(
                     "\\pi\\\\profileid\\{0}\\nick\\{1}\\userid\\{2}\\email\\{3}\\sig\\{4}\\uniquenick\\{5}\\pid\\0\\firstname\\\\lastname\\" +
                     "\\countrycode\\{6}\\birthday\\16844722\\lon\\0.000000\\lat\\0.000000\\loc\\\\id\\{7}\\final\\",
-                    AccountInfo.UId, AccountInfo.Username, AccountInfo.UId, "private@b2bf.net", GenerateSig(), AccountInfo.Username, "BE", ((id == "2") ? "2" : "5"))));
+                    Settings.GamerId, Settings.GamerId, Settings.GamerId, "private@b2bf.net", GenerateSig(), Settings.GamerId, "BE", ((id == "2") ? "2" : "5"))));
         }
 
         private static string GenerateSig()

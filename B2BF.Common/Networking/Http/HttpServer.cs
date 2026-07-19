@@ -5,7 +5,8 @@ using System.Net.Sockets;
 using System.Net;
 using System.Resources;
 using System.Text;
-using B2BF.Common.Account;
+using B2BF.Common.Data;
+using Sentry;
 
 namespace B2BF.Common.Networking.Http
 {
@@ -38,9 +39,9 @@ namespace B2BF.Common.Networking.Http
             try
             {
 #if DEBUG
-                lMagma = new TcpListener(IPAddress.Any, 8888);
+                lMagma = new TcpListener(IPAddress.Any, Endpoints.LocalHttpPort);
 #else
-                lMagma = new TcpListener(IPAddress.Loopback, 8888);
+                lMagma = new TcpListener(IPAddress.Loopback, Endpoints.LocalHttpPort);
 #endif
                 lMagma.Start();
                 TcpClient client;
@@ -53,13 +54,16 @@ namespace B2BF.Common.Networking.Http
                     {
                         ProcessMagma(Encoding.ASCII.GetString(data), ns);
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        SentrySdk.CaptureException(ex);
+                    }
                     client.Close();
                 }
             }
             catch (Exception ex)
             {
-
+                SentrySdk.CaptureException(ex);
             }
         }
 
@@ -67,40 +71,38 @@ namespace B2BF.Common.Networking.Http
         {
             string[] lines = data.Split("\r\n".ToCharArray(), StringSplitOptions.RemoveEmptyEntries);
             string cmd = lines[0].Split(' ')[0];
-            string url = lines[0].Split(' ')[1].Split(':')[0];
-
-            if (url.StartsWith("/oauthloginreturn"))
-            {
-                ReplyWithXML(s, "You may now close this tab.");
-                var code = url.Substring(23, 32);
-                var state = url.Substring(62);
-                AccountInfo.ValidateLoginResult(code, state);
-                return;
-            }
+            string url = lines[0].Split(' ')[1];
 
             if (url.StartsWith("/ASP"))
                 url = url.Substring(4);
 
-            switch (cmd)
+            try
             {
-                case "GET":
-                    var response = _wc.DownloadString("https://stats.b2bf2.net" + url);
-                    ReplyWithXML(s, response);
-                    return;
-                case "POST":
-                    if (url.StartsWith("/selectunlock.aspx"))
-                    {
-                        var postResponse = _wc.UploadString("https://stats.b2bf2.net" + url, "");
-                        ReplyWithXML(s, postResponse);
+                switch (cmd)
+                {
+                    case "GET":
+                        var response = _wc.DownloadString(Endpoints.StatsBaseUrl + url);
+                        ReplyWithXML(s, response);
                         return;
-                    }
-                    _wc.Headers.Add("user-agent", "GameSpyHTTP/1.0");
-                    var length = lines.Where(x => x.StartsWith("Content-Length"));
-                    var idx = data.IndexOf('{');
-                    var snapshot = data.Substring(idx);
-                    _wc.UploadString("https://stats.b2bf2.net/bf2statistics.php", snapshot);
-                    ReplyWithXML(s, "O");
-                    break;
+                    case "POST":
+                        if (url.StartsWith("/selectunlock.aspx"))
+                        {
+                            var postResponse = _wc.UploadString(Endpoints.StatsBaseUrl + url, "");
+                            ReplyWithXML(s, postResponse);
+                            return;
+                        }
+                        _wc.Headers.Add("user-agent", "GameSpyHTTP/1.0");
+                        var length = lines.Where(x => x.StartsWith("Content-Length"));
+                        var idx = data.IndexOf('{');
+                        var snapshot = data.Substring(idx);
+                        _wc.UploadString(Endpoints.StatsBaseUrl + "/bf2statistics.php", snapshot);
+                        ReplyWithXML(s, "O");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                SentrySdk.CaptureException(ex);
             }
 
             return;

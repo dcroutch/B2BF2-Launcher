@@ -1,4 +1,4 @@
-﻿using B2BF.Common.Account;
+﻿using B2BF.Common.Data;
 using B2BF.Common.Networking.GameSpy.Login.Packets;
 using System;
 using System.Collections.Generic;
@@ -47,10 +47,10 @@ namespace B2BF.Common.Networking.GameSpy.Login
                 switch (packetData[1])
                 {
                     case "nicks":
-                        Send(string.Format("\\nr\\1\\nick\\{0}\\uniquenick\\{1}\\ndone\\final\\", AccountInfo.Username, AccountInfo.Username));
+                        Send(string.Format("\\nr\\1\\nick\\{0}\\uniquenick\\{1}\\ndone\\final\\", Settings.GamerId, Settings.GamerId));
                         break;
                     case "check":
-                        Send(string.Format("\\cur\\0\\pid\\{0}\\final\\", AccountInfo.UId));
+                        Send(string.Format("\\cur\\0\\pid\\{0}\\final\\", Settings.GamerId));
                         break;
                 }
             }

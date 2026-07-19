@@ -1,4 +1,4 @@
-﻿using B2BF.Common.Account;
+﻿using B2BF.Common.Data;
 using B2BF.Common.Extensions;
 using System.Security.Cryptography;
 using System.Text;
@@ -7,31 +7,29 @@ namespace B2BF.Common.Networking.GameSpy.Login.Packets
 {
     public class LoginPacket
     {
-        public static async void Handle(string[] packet, LoginClient loginClient)
+        /// <summary>
+        /// Handles the in-game GameSpy login handshake BF2.exe performs against our local
+        /// LoginServer. There's no remote account to check this against (see AccountInfo removal -
+        /// identity is whatever profile the player set up natively in BF2 itself), so this accepts
+        /// whatever uniquenick the client presents rather than validating it against anything.
+        /// </summary>
+        public static void Handle(string[] packet, LoginClient loginClient)
         {
             var username = packet.GetParameterValue("uniquenick");
             if (!string.IsNullOrEmpty(username))
             {
                 loginClient.clientChallengeKey = packet.GetParameterValue("challenge");
                 var clientResponse = packet.GetParameterValue("response");//this is to verify the client
-                if (username != AccountInfo.Username)
-                {
-                    loginClient.Send("\\error\\\\err\\265\\fatal\\\\errmsg\\The uniquenick provided is incorrect!\\id\\1\\final\\");
-                    return;
-                }
 
                 if (clientResponse == GenerateResponseValue(loginClient, username, "c922477f848517a8c3e2fc6316c197c7", loginClient.clientChallengeKey, loginClient.serverChallengeKey))
                 {
-                    /*if (!await AccountInfo.ValidateTokenAsync())
-                        return;*/
-
                     loginClient.LoginToken = RandomString(22);
 
                     // Use the GenerateResponseValue method to create the proof string
                     string proof = GenerateResponseValue(loginClient, username, "c922477f848517a8c3e2fc6316c197c7", loginClient.serverChallengeKey, loginClient.clientChallengeKey);
                     loginClient.Send(string.Format(
                         "\\lc\\2\\sesskey\\{0}\\proof\\{1}\\userid\\{2}\\profileid\\{3}\\uniquenick\\{4}\\lt\\{5}__\\id\\1\\final\\",
-                        GenerateSession(loginClient, username), proof, AccountInfo.UId, AccountInfo.UId, username, loginClient.LoginToken
+                        GenerateSession(loginClient, username), proof, Settings.GamerId, Settings.GamerId, username, loginClient.LoginToken
                     ));
                     return;
                 }

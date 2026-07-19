@@ -8,15 +8,18 @@ namespace B2BF.Common.Data
     public static class Settings
     {
         private static readonly string SettingsPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "B2BF", "settings.xml");
-        public static String RememberMeContainer
+        /// <summary>Stable local id used as the in-game userid/profileid - generated once, not tied to any real account.</summary>
+        public static string GamerId
         {
             get
             {
-                return ReadValueSafe("RememberMeContainer", "");
-            }
-            set
-            {
-                WriteValue("RememberMeContainer", value.ToString());
+                var value = ReadValueSafe("GamerId", "");
+                if (string.IsNullOrEmpty(value))
+                {
+                    value = Random.Shared.Next(100000, 999999).ToString();
+                    WriteValue("GamerId", value);
+                }
+                return value;
             }
         }
         /*public static GameType LastSelectedGame

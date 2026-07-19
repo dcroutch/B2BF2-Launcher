@@ -1,5 +1,4 @@
 using AutoUpdaterDotNET;
-using B2BF.Common.Account;
 using B2BF.Common.Data;
 using B2BF.Common.Helpers;
 using B2BF.Common.Networking.GameSpy.CdKey;
@@ -9,6 +8,7 @@ using B2BF.Common.Networking.GameSpy.Search;
 using B2BF.Common.Networking.Http;
 using B2BF.Common.Updater;
 using B2BF.Launcher.Helpers;
+using Sentry;
 using System.Diagnostics;
 
 namespace B2BF.Launcher
@@ -30,8 +30,6 @@ namespace B2BF.Launcher
             _updater.NotifyAction += OnNotify;
             _updater.ProgressBarAction += OnProgress;
             _updater.StartButtonAction += OnButton;
-
-            AccountInfo.OnAccountInfoChanged += AccountInfoChanged;
 
             LoginServer.Start();
             SearchServer.Start();
@@ -87,49 +85,33 @@ namespace B2BF.Launcher
                 processes = Process.GetProcessesByName("bf2.exe");
             }
 
-            if (!AccountInfo.HasLoggedInUser())
+            button1.Enabled = false;
+
+            if (string.IsNullOrEmpty(Settings.GamePath))
             {
-                button1.Enabled = false;
-            }
-            else
-            {
-                if (!await AccountInfo.ValidateTokenAsync())
+                var existingInstall = RegistryHelper.GetBattlefield2Installation();
+                var prompt = string.Join("\n\n",
+                    "Detected an existing Battlefield 2 installation at:",
+                    existingInstall,
+                    "Do you want to use that instead of downloading a fresh copy?"
+                );
+                if (!string.IsNullOrEmpty(existingInstall) &&
+                    MessageBox.Show(prompt,
+                        "Existing installation detected",
+                        MessageBoxButtons.YesNo) ==
+                    DialogResult.Yes)
                 {
-                    button1.Enabled = false;
-                    Settings.RememberMeContainer = "";
-                    return;
+                    Settings.GamePath = existingInstall;
+                }
+                else
+                {
+                    Settings.GamePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Phoenix Games");
                 }
 
-                label2.Text = "Status: Logged In";
-                label3.Text = "Username: " + AccountInfo.Username;
-                button2.Visible = false;
-
-                if (string.IsNullOrEmpty(Settings.GamePath))
-                {
-                    var existingInstall = RegistryHelper.GetBattlefield2Installation();
-                    var prompt = string.Join("\n\n",
-                        "Detected an existing Battlefield 2 installation at:",
-                        existingInstall,
-                        "Do you want to use that instead of downloading a fresh copy?"
-                    );
-                    if (!string.IsNullOrEmpty(existingInstall) &&
-                        MessageBox.Show(prompt,
-                            "Existing installation detected",
-                            MessageBoxButtons.YesNo) ==
-                        DialogResult.Yes)
-                    {
-                        Settings.GamePath = existingInstall;
-                    }
-                    else
-                    {
-                        Settings.GamePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Phoenix Games");
-                    }
-
-                    RegistryHelper.WriteBattlefield2Installation();
-                }
-
-                Task.Factory.StartNew(() => _updater.Start());
+                RegistryHelper.WriteBattlefield2Installation();
             }
+
+            Task.Factory.StartNew(() => _updater.Start());
         }
 
         private void OnButton(bool obj)
@@ -166,48 +148,25 @@ namespace B2BF.Launcher
             });
         }
 
-        private void AccountInfoChanged()
+        private void button1_Click(object sender, EventArgs e)
         {
-            this.Invoke(new Action(() =>
-            {
-                button1.Enabled = true;
-                button2.Visible = false;
-                label2.Text = "Status: Logged In";
-                label3.Text = "Username: " + AccountInfo.Username;
-                Task.Factory.StartNew(() => _updater.Start());
-            }));
-        }
-
-        private void button2_Click(object sender, EventArgs e)
-        {
-            var url = AccountInfo.GetLoginUrl();
-            var psi = new ProcessStartInfo
-            {
-                UseShellExecute = true,
-                FileName = url,
-            };
-            Process.Start(psi);
-        }
-
-        private async void button1_Click(object sender, EventArgs e)
-        {
-            if (!AccountInfo.HasLoggedInUser())
-            {
-                MessageBox.Show("Not logged in!");
-                return;
-            }
-
-            ServerListHelper.UpdateServerList();
+            _ = ServerListHelper.UpdateServerList();
             RegistryHelper.DisableBF2HubAutoPatching();
 
             OnNotify("Preflight check...");
-            ProfileHelper.CreateProfileIfNotExists();
             if (!File.Exists(Path.Combine(Settings.BF2GamePath, "dinput8.dll")))
             {
                 // download it, TODO
             }
-            using (var fs = new FileStream(Path.Combine(Settings.BF2GamePath, "BF2.exe"), FileMode.Open))
+
+            foreach (var stale in Process.GetProcessesByName("bf2"))
             {
+                try { stale.Kill(); stale.WaitForExit(3000); } catch { }
+            }
+
+            try
+            {
+                using var fs = new FileStream(Path.Combine(Settings.BF2GamePath, "BF2.exe"), FileMode.Open);
                 fs.Position = 0x5627E0; // position of the bf2hub patch
                 fs.WriteByte(0x57); // W
                 fs.WriteByte(0x53); // S
@@ -220,17 +179,23 @@ namespace B2BF.Launcher
                 fs.WriteByte(0x6C); // l
                 fs.WriteByte(0x6C); // l
             }
+            catch (IOException ex)
+            {
+                SentrySdk.CaptureException(ex);
+                MessageBox.Show(this,
+                    "BF2.exe is still in use by another process (likely a previous game instance that didn't fully exit). Close it and try again.",
+                    "Game file in use", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
 
-            OnNotify("Fetching key...");
-            var cdkey = await AccountInfo.GetCdKeyAsync();
             OnNotify("Launching Game!");
 
-            // Default/vanilla arguments
+            // Default/vanilla arguments - no +playerName/+playerPassword: BF2's own native
+            // "create profile" screen handles identity when no profile exists yet, we don't
+            // pre-seed one.
             var arguments = new List<string>
             {
                 $"+modPath \"mods/{Settings.Mod}\"",
-                $"+playerName \"{AccountInfo.Username}\"",
-                "+playerPassword \"testingitnotimportant\""
             };
             if (!Settings.Fullscreen)
             {
@@ -242,10 +207,12 @@ namespace B2BF.Launcher
                 // This is really a boolean flag, so we cannot set it to 0 (game still would not show intro videos)
                 arguments.Add("+restart 1");
             }
-            
-            // Custom arguments
-            arguments.Add($"/gscdk x9392{cdkey}");
+
             arguments.Add($"/language {Settings.Language}");
+            // dinput8.dll (Phoenix Network's network hook) refuses to run without this, showing
+            // "Please start the game using the B2BF2 Launcher!" - it needs to know where to
+            // redirect GameSpy traffic, which is our own loopback servers.
+            arguments.Add("/overridehostname 127.0.0.1");
 
             var psi = new ProcessStartInfo(Path.Combine(Settings.BF2GamePath, "BF2.exe"))
             {
@@ -297,7 +264,7 @@ namespace B2BF.Launcher
             AutoUpdater.LetUserSelectRemindLater = false;
             AutoUpdater.TopMost = true;
             //AutoUpdater.ReportErrors = true;
-            Task.Factory.StartNew(() => AutoUpdater.Start("https://cdn.phoenixnetwork.net/updater/b2bf/client-launcher.xml"));
+            Task.Factory.StartNew(() => AutoUpdater.Start(Endpoints.LauncherUpdateManifestUrl));
         }
 
         private void button3_Click(object sender, EventArgs e)
@@ -326,29 +293,6 @@ namespace B2BF.Launcher
             button1.Enabled = false;
             button3.Enabled = false;
             Task.Factory.StartNew(() => _updater.Start());
-        }
-
-        private void button4_Click(object sender, EventArgs e)
-        {
-            if (!AccountInfo.HasLoggedInUser())
-            {
-                MessageBox.Show("Not logged in!");
-                return;
-            }
-
-            AccountInfo.AccessToken = null;
-            AccountInfo.Username = null;
-            AccountInfo.UId = null;
-            Settings.RememberMeContainer = "";
-
-            this.Invoke(new Action(() =>
-            {
-                button1.Enabled = false;
-                button2.Visible = true;
-                button4.Visible = false;
-                label2.Text = "Not Logged In";
-                label3.Text = "Username: " + AccountInfo.Username;
-            }));
         }
     }
 }

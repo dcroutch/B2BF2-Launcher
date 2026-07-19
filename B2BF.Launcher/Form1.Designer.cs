@@ -38,14 +38,8 @@
             progressBar1 = new ProgressBar();
             label1 = new Label();
             button1 = new Button();
-            groupBox2 = new GroupBox();
-            button4 = new Button();
-            button2 = new Button();
-            label3 = new Label();
-            label2 = new Label();
             button3 = new Button();
             groupBox1.SuspendLayout();
-            groupBox2.SuspendLayout();
             SuspendLayout();
             // 
             // groupBox1
@@ -149,58 +143,7 @@
             button1.Text = "Start";
             button1.UseVisualStyleBackColor = true;
             button1.Click += button1_Click;
-            // 
-            // groupBox2
-            // 
-            groupBox2.Controls.Add(button4);
-            groupBox2.Controls.Add(button2);
-            groupBox2.Controls.Add(label3);
-            groupBox2.Controls.Add(label2);
-            groupBox2.Location = new Point(423, 12);
-            groupBox2.Name = "groupBox2";
-            groupBox2.Size = new Size(265, 148);
-            groupBox2.TabIndex = 1;
-            groupBox2.TabStop = false;
-            groupBox2.Text = "User Info";
-            // 
-            // button4
-            // 
-            button4.Location = new Point(87, 119);
-            button4.Name = "button4";
-            button4.Size = new Size(75, 23);
-            button4.TabIndex = 3;
-            button4.Text = "Logout";
-            button4.UseVisualStyleBackColor = true;
-            button4.Click += button4_Click;
-            // 
-            // button2
-            // 
-            button2.Location = new Point(6, 119);
-            button2.Name = "button2";
-            button2.Size = new Size(75, 23);
-            button2.TabIndex = 2;
-            button2.Text = "Login";
-            button2.UseVisualStyleBackColor = true;
-            button2.Click += button2_Click;
-            // 
-            // label3
-            // 
-            label3.AutoSize = true;
-            label3.Location = new Point(6, 34);
-            label3.Name = "label3";
-            label3.Size = new Size(95, 15);
-            label3.TabIndex = 1;
-            label3.Text = "Username: None";
-            // 
-            // label2
-            // 
-            label2.AutoSize = true;
-            label2.Location = new Point(6, 19);
-            label2.Name = "label2";
-            label2.Size = new Size(118, 15);
-            label2.TabIndex = 0;
-            label2.Text = "Status: Not logged in";
-            // 
+            //
             // button3
             // 
             button3.Location = new Point(480, 277);
@@ -217,7 +160,6 @@
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(700, 338);
             Controls.Add(button3);
-            Controls.Add(groupBox2);
             Controls.Add(button1);
             Controls.Add(label1);
             Controls.Add(progressBar1);
@@ -231,8 +173,6 @@
             Shown += Form1_Shown;
             groupBox1.ResumeLayout(false);
             groupBox1.PerformLayout();
-            groupBox2.ResumeLayout(false);
-            groupBox2.PerformLayout();
             ResumeLayout(false);
             PerformLayout();
         }
@@ -243,10 +183,6 @@
         private ProgressBar progressBar1;
         private Label label1;
         private Button button1;
-        private GroupBox groupBox2;
-        private Label label3;
-        private Label label2;
-        private Button button2;
         private CheckBox checkBox1;
         private CheckBox checkBox2;
         private Label label4;
@@ -254,6 +190,5 @@
         private ComboBox comboBox2;
         private Label label5;
 		private Button button3;
-        private Button button4;
     }
 }

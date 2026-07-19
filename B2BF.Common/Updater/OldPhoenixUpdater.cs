@@ -1,5 +1,6 @@
 ﻿using B2BF.Common.Data;
 using B2BF.Service.Updater;
+using Sentry;
 using System.Drawing;
 using System.Net;
 using System.Security.Cryptography;
@@ -27,22 +28,36 @@ namespace B2BF.Common.Updater
 
         public void Start()
         {
-            GamePath = Settings.BF2GamePath;
-            var remoteUrl = "https://cdn.phoenixnetwork.net/updater/game-bf2.json";
-            UpdateXML = PhoenixUpdateXml.Parse(new Uri(remoteUrl));
-            var gameVersion = Settings.GetGameVersion("Battlefield2");
-            if (gameVersion == null)
+            try
             {
-                BeginUpdating(true);
+                GamePath = Settings.BF2GamePath;
+                UpdateXML = PhoenixUpdateXml.Parse(new Uri(Endpoints.GameUpdateManifestUrl));
+                if (UpdateXML == null)
+                {
+                    SetNotify("Could not reach the update server. Check your connection and try again.", Color.Red);
+                    return;
+                }
+
+                var gameVersion = Settings.GetGameVersion("Battlefield2");
+                if (gameVersion == null)
+                {
+                    BeginUpdating(true);
+                }
+                else if (UpdateXML.IsNewerThan(gameVersion))
+                {
+                    BeginUpdating();
+                }
+
+                SetNotify("Finished", Color.Green);
             }
-            else if (UpdateXML.IsNewerThan(gameVersion))
+            catch (Exception ex)
             {
-                BeginUpdating();
+                SentrySdk.CaptureException(ex);
+                SetNotify("Update failed: " + ex.Message, Color.Red);
             }
-        skip: SetNotify("Finished", Color.Green);
-            if (StartButtonAction != null)
+            finally
             {
-                StartButtonAction(true);
+                StartButtonAction?.Invoke(true);
             }
         }
 
@@ -54,7 +69,7 @@ namespace B2BF.Common.Updater
         private void BeginUpdating(bool full = false)
         {
             SetNotify("Downloading update...", Color.Orange);
-            var remoteUrl = "https://cdn.phoenixnetwork.net/updater/versions/client/Battlefield2/" + Convert.ToString(UpdateXML.GameVersion) + "/";
+            var remoteUrl = Endpoints.GameUpdateFilesBaseUrl(Convert.ToString(UpdateXML.GameVersion));
             if (full)
             {
                 if (!Directory.Exists(Path.Combine(Settings.BF2GamePath)))

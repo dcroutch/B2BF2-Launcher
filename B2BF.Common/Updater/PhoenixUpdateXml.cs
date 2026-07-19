@@ -2,6 +2,7 @@
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using Newtonsoft.Json;
+using Sentry;
 
 namespace B2BF.Service.Updater
 {
@@ -44,6 +45,7 @@ namespace B2BF.Service.Updater
             }
             catch (Exception ex)
             {
+                SentrySdk.CaptureException(ex);
                 result = null;
             }
             return result;
