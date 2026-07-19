@@ -612,7 +612,12 @@ function resolve_propose_accession(array &$world, array $order): void {
 }
 
 const HOSTILE_WORDS = ['demand', 'threat', 'ultimatum', 'attack', 'seize', 'annex', 'invade', 'destroy', 'refund', 'reparation', 'punish', 'conquer', 'strike', 'bomb', 'sanction', 'humiliate', 'dominate', 'reject', 'insult'];
-const FRIENDLY_WORDS = ['gift', 'apolog', 'support', 'help', 'praise', 'honor', 'celebrate', 'thank', 'donate', 'forgive', 'welcome', 'invite', 'gratitude', 'friendship', 'congratulat'];
+// Regression fix: a naive alliance-seeking sentence like "let's team up
+// with the UK in case anyone attacks us" used to score as an
+// *extraordinary demand* (worsening relations with the exact nation the
+// player wanted to befriend), purely because "attack" is a hostile word
+// and nothing offset it.
+const FRIENDLY_WORDS = ['gift', 'apolog', 'support', 'help', 'praise', 'honor', 'celebrate', 'thank', 'donate', 'forgive', 'welcome', 'invite', 'gratitude', 'friendship', 'congratulat', 'team up', 'join forces', 'protect', 'defend', 'partner', 'ally'];
 const WILDCARD_RELATION_SCALE = -6.0;
 const WILDCARD_DOMESTIC_SCALE = 1.5;
 const WILDCARD_PROVOCATION_THRESHOLD = 2;

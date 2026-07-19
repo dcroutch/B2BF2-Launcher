@@ -113,12 +113,12 @@ VERB_RULES = (
     ("propose_accession", ("vote to join", "accede to", "join the union", "unite with", "merge into", "petition to join")),
     ("sue_for_peace", ("sue for peace", "cease fire", "ceasefire", "end the war", "make peace", "stop the war", "surrender", "surrenders", "surrendered")),
     ("declare_war", ("declare war", "invade", "attack", "wage war", "go to war", "bomb", "conquer")),
-    ("impose_embargo", ("embargo", "sanction", "blockade", "boycott", "surround", "encircle")),
+    ("impose_embargo", ("embargo", "sanction", "blockade", "boycott", "surround", "encircle", "cut ties", "stop buying", "stop trading", "cut off trade")),
     ("break_alliance", ("break alliance", "break our alliance", "betray", "abandon our alliance", "end alliance", "end our alliance")),
-    ("propose_alliance", ("alliance", "ally with", "mutual defense", "defense pact")),
+    ("propose_alliance", ("alliance", "ally with", "mutual defense", "defense pact", "team up with", "join forces with")),
     ("trade_pact", ("trade deal", "trade pact", "trade agreement", "free trade", "trade with")),
-    ("improve_relations", ("improve relations", "diplomacy", "reach out", "extend friendship", "make friends", "apologize")),
-    ("build_military", ("build military", "build up the military", "rearm", "mobilize", "increase defense spending", "build army")),
+    ("improve_relations", ("improve relations", "diplomacy", "reach out", "extend friendship", "make friends", "be friends with", "apologize")),
+    ("build_military", ("build military", "build up the military", "rearm", "mobilize", "increase defense spending", "build army", "on the military", "on the army", "military spending", "fund the military", "boost the military", "boost the army", "beef up the military", "beef up the army")),
     (
         "modify_constitution",
         (
@@ -138,9 +138,9 @@ VERB_RULES = (
             "declare itself a", "become a",
         ),
     ),
-    ("invest_sector", ("invest in", "boost", "develop", "fund", "grow the", "subsidize")),
+    ("invest_sector", ("invest in", "boost", "develop", "fund", "grow the", "subsidize", "improve", "upgrade", "modernize")),
     ("invest_economy", ("invest", "stimulate", "economic stimulus", "grow the economy")),
-    ("pass", ("pass", "do nothing", "wait", "hold position", "stand down")),
+    ("pass", ("pass", "do nothing", "not do anything", "nothing this month", "nothing this turn", "wait", "hold position", "stand down", "sit tight", "stand by")),
 )
 
 # Maps keywords about a *form of government* to a GOVERNMENT_TYPES value,

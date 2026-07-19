@@ -211,6 +211,65 @@ class TestPassRecognizesTheLiteralWord(unittest.TestCase):
         self.assertEqual(order.type, "pass")
 
 
+class TestNaivePlayerPhrasing(unittest.TestCase):
+    """Regression tests found by simulating a naive human player who only
+    knows the game from its intro/tips text, not the actual keyword
+    lists -- casual phrasing a real player would type without any idea
+    what the parser is looking for."""
+
+    def test_not_do_anything_this_month_is_recognized_as_pass(self):
+        world = default_world(player_id="india")
+        order = parse_command(world, "india", "let's not do anything this month")
+        self.assertEqual(order.type, "pass")
+
+    def test_spend_more_on_the_army_is_recognized_as_build_military(self):
+        world = default_world(player_id="india")
+        order = parse_command(world, "india", "spend more on the army")
+        self.assertEqual(order.type, "build_military")
+
+    def test_cut_ties_with_is_recognized_as_an_embargo(self):
+        world = default_world(player_id="india")
+        order = parse_command(world, "india", "cut ties with russia")
+        self.assertEqual(order.type, "impose_embargo")
+        self.assertEqual(order.target_id, "russia")
+
+    def test_stop_buying_from_is_recognized_as_an_embargo(self):
+        world = default_world(player_id="india")
+        order = parse_command(world, "india", "stop buying stuff from china")
+        self.assertEqual(order.type, "impose_embargo")
+        self.assertEqual(order.target_id, "china")
+
+    def test_improve_sector_output_is_recognized_as_invest_sector(self):
+        world = default_world(player_id="india")
+        order = parse_command(
+            world, "india", "improve farming output so people have enough food"
+        )
+        self.assertEqual(order.type, "invest_sector")
+        self.assertEqual(order.detail, "agriculture")
+
+    def test_be_friends_with_is_recognized_as_improve_relations(self):
+        world = default_world(player_id="india")
+        order = parse_command(world, "india", "let's be friends with pakistan")
+        self.assertEqual(order.type, "improve_relations")
+        self.assertEqual(order.target_id, "pakistan")
+
+    def test_defensive_alliance_talk_does_not_read_as_hostile(self):
+        # Regression: "let's team up with the UK in case anyone attacks
+        # us" used to score as an *extraordinary demand* on the wildcard
+        # fallback purely because "attack" is a hostile word, actively
+        # worsening relations with the nation the player wanted to
+        # befriend -- the opposite of what a naive player typing this
+        # would expect.
+        world = default_world(player_id="india")
+        order = parse_command(
+            world, "india",
+            "let's team up with the uk in case anyone attacks us",
+        )
+        self.assertEqual(order.actor_id, "india")
+        from worldsim.orders import _sentiment_magnitude
+        self.assertLessEqual(_sentiment_magnitude(order.detail or ""), 0)
+
+
 class TestParseCommands(unittest.TestCase):
     """parse_commands splits one submission into several distinct orders
     for the same turn, so a player can queue up multiple actions at once

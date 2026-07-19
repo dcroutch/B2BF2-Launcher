@@ -741,6 +741,12 @@ FRIENDLY_WORDS = (
     "gift", "apolog", "support", "help", "praise", "honor", "celebrate",
     "thank", "donate", "forgive", "welcome", "invite", "gratitude",
     "friendship", "congratulat",
+    # Regression fix: a naive alliance-seeking sentence like "let's team up
+    # with the UK in case anyone attacks us" used to score as an
+    # *extraordinary demand* (worsening relations with the exact nation
+    # the player wanted to befriend), purely because "attack" is a
+    # hostile word and nothing offset it.
+    "team up", "join forces", "protect", "defend", "partner", "ally",
 )
 WILDCARD_RELATION_SCALE = -6
 WILDCARD_DOMESTIC_SCALE = 1.5
