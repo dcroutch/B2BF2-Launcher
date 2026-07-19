@@ -42,6 +42,50 @@ def _find(lowered: str, phrase: str) -> int:
     return match.start() if match else -1
 
 
+_IRREGULAR_INFLECTIONS = {
+    "go": ("go", "goes", "went", "going"),
+    "become": ("become", "becomes", "became", "becoming"),
+    "hold": ("hold", "holds", "held", "holding"),
+}
+
+
+def _inflections(word: str) -> set[str]:
+    """All the inflected forms of `word` a player might plausibly type
+    ("embargo" -> "embargoes"/"embargoed"/"embargoing", etc.), so a keyword
+    list built around bare infinitives ("embargo", "invade") still matches
+    ordinary conjugated phrasing ("China embargoes Russia") instead of
+    silently falling through to a vague wildcard just because the player
+    used a normal tense."""
+    if word in _IRREGULAR_INFLECTIONS:
+        return set(_IRREGULAR_INFLECTIONS[word])
+    variants = {word, word + "s", word + "es"}
+    if word.endswith("e"):
+        variants.add(word + "d")
+        variants.add(word[:-1] + "ing")
+    else:
+        variants.add(word + "ed")
+        variants.add(word + "ing")
+    if word.endswith("y") and len(word) > 1 and word[-2] not in "aeiou":
+        variants.add(word[:-1] + "ies")
+        variants.add(word[:-1] + "ied")
+    return variants
+
+
+def _find_verb(lowered: str, phrase: str) -> int:
+    """Like _find, but tolerant of the phrase's leading verb being
+    conjugated -- "embargo Russia" still recognizes "embargoes Russia" /
+    "embargoed Russia" / "embargoing Russia", since the keyword lists are
+    written as bare infinitives but players naturally type normal tenses."""
+    head, _, rest = phrase.partition(" ")
+    rest = f" {rest}" if rest else ""
+    best = -1
+    for variant in _inflections(head):
+        idx = _find(lowered, variant + rest)
+        if idx != -1 and (best == -1 or idx < best):
+            best = idx
+    return best
+
+
 def _find_non_possessive(lowered: str, phrase: str) -> int:
     """Like _find, but returns the earliest occurrence of `phrase` that
     isn't a possessive mention ("Germany's collapse"). A plain first-match
@@ -68,7 +112,7 @@ VERB_RULES = (
     ("propose_accession", ("vote to join", "accede to", "join the union", "unite with", "merge into", "petition to join")),
     ("sue_for_peace", ("sue for peace", "cease fire", "ceasefire", "end the war", "make peace", "stop the war", "surrender", "surrenders", "surrendered")),
     ("declare_war", ("declare war", "invade", "attack", "wage war", "go to war", "bomb", "conquer")),
-    ("impose_embargo", ("embargo", "sanction", "blockade", "boycott")),
+    ("impose_embargo", ("embargo", "sanction", "blockade", "boycott", "surround", "encircle")),
     ("break_alliance", ("break alliance", "break our alliance", "betray", "abandon our alliance", "end alliance", "end our alliance")),
     ("propose_alliance", ("alliance", "ally with", "mutual defense", "defense pact")),
     ("trade_pact", ("trade deal", "trade pact", "trade agreement", "free trade")),
@@ -89,8 +133,8 @@ VERB_RULES = (
             # broad verbs can't misfire into an unintended government
             # change (see parse_command's matched_type == "modify_constitution"
             # branch).
-            "enacts a", "establishes a", "installs a", "institutes a",
-            "declares itself a", "becomes a",
+            "enact a", "establish a", "install a", "institute a",
+            "declare itself a", "become a",
         ),
     ),
     ("invest_sector", ("invest in", "boost", "develop", "fund", "grow the", "subsidize")),
@@ -185,12 +229,19 @@ def parse_command(world: World, player_id: str, text: str) -> Order:
 
     matched_type, verb_pos = None, None
     for order_type, keywords in VERB_RULES:
+        # Take the earliest-occurring keyword in the text, not just
+        # whichever one happens to be listed first -- otherwise a keyword
+        # list order like ("embargo", "blockade", "surround") can match on
+        # "blockade" later in the sentence even when "surround" appears
+        # right next to the actual target earlier, wrongly placing the
+        # verb after the nation mention and tripping the actor-lock guard.
+        best_idx = None
         for kw in keywords:
-            idx = _find(lowered, kw)
-            if idx != -1:
-                matched_type, verb_pos = order_type, idx
-                break
-        if matched_type:
+            idx = _find_verb(lowered, kw)
+            if idx != -1 and (best_idx is None or idx < best_idx):
+                best_idx = idx
+        if best_idx is not None:
+            matched_type, verb_pos = order_type, best_idx
             break
 
     # Guard rail: the text's apparent subject is a nation other than the

@@ -146,5 +146,48 @@ class TestPossessiveMentionIsNotTreatedAsSubject(unittest.TestCase):
         self.assertEqual(order.target_id, "france")
 
 
+class TestVerbConjugation(unittest.TestCase):
+    """Regression tests: the keyword lists were originally written as bare
+    infinitives ("embargo", "invade") and matched only that exact word, so
+    a player typing ordinary conjugated English ("China embargoes Russia")
+    silently fell through to a vague wildcard instead of the intended
+    order -- a huge, largely invisible gap in what the parser understood."""
+
+    def test_third_person_present_tense_is_recognized(self):
+        world = default_world(player_id="china")
+        order = parse_command(world, "china", "China embargoes Russia")
+        self.assertEqual(order.type, "impose_embargo")
+        self.assertEqual(order.target_id, "russia")
+
+    def test_past_tense_is_recognized(self):
+        world = default_world(player_id="china")
+        order = parse_command(world, "china", "China embargoed Russia")
+        self.assertEqual(order.type, "impose_embargo")
+        self.assertEqual(order.target_id, "russia")
+
+    def test_alternate_verb_conjugation_is_recognized(self):
+        world = default_world(player_id="china")
+        order = parse_command(world, "china", "China sanctions Russia")
+        self.assertEqual(order.type, "impose_embargo")
+        self.assertEqual(order.target_id, "russia")
+
+    def test_earliest_matching_keyword_wins_not_first_listed(self):
+        # Regression: within one order type's keyword list, the matcher
+        # used to stop at whichever keyword was listed first, even if a
+        # different keyword for that same order type occurred earlier in
+        # the text -- e.g. "blockade" (listed before "surround") would win
+        # even when "surround" sat right next to the actual target and
+        # "blockade" only appeared much later, wrongly making the verb
+        # look like it came *after* the nation mention and tripping the
+        # actor-lock guard into downgrading a legitimate order to a
+        # wildcard.
+        world = default_world(player_id="china")
+        order = parse_command(
+            world, "china", "Surround Russia and institute a blockade"
+        )
+        self.assertEqual(order.type, "impose_embargo")
+        self.assertEqual(order.target_id, "russia")
+
+
 if __name__ == "__main__":
     unittest.main()

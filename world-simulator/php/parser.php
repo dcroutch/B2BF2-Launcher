@@ -17,7 +17,7 @@ const VERB_RULES = [
     ['propose_accession', ['vote to join', 'accede to', 'join the union', 'unite with', 'merge into', 'petition to join']],
     ['sue_for_peace', ['sue for peace', 'cease fire', 'ceasefire', 'end the war', 'make peace', 'stop the war', 'surrender', 'surrenders', 'surrendered']],
     ['declare_war', ['declare war', 'invade', 'attack', 'wage war', 'go to war', 'bomb', 'conquer']],
-    ['impose_embargo', ['embargo', 'sanction', 'blockade', 'boycott']],
+    ['impose_embargo', ['embargo', 'sanction', 'blockade', 'boycott', 'surround', 'encircle']],
     ['break_alliance', ['break alliance', 'break our alliance', 'betray', 'abandon our alliance', 'end alliance', 'end our alliance']],
     ['propose_alliance', ['alliance', 'ally with', 'mutual defense', 'defense pact']],
     ['trade_pact', ['trade deal', 'trade pact', 'trade agreement', 'free trade']],
@@ -29,8 +29,8 @@ const VERB_RULES = [
         'coup', 'one-party rule', 'seize absolute power', 'become a dictatorship',
         'restore democracy', 'restore parliament', 'restore parliamentary',
         'become a democracy', 'transition to democracy', 'hold free elections',
-        'enacts a', 'establishes a', 'installs a', 'institutes a',
-        'declares itself a', 'becomes a',
+        'enact a', 'establish a', 'install a', 'institute a',
+        'declare itself a', 'become a',
     ]],
     ['invest_sector', ['invest in', 'boost', 'develop', 'fund', 'grow the', 'subsidize']],
     ['invest_economy', ['invest', 'stimulate', 'economic stimulus', 'grow the economy']],
@@ -69,6 +69,53 @@ function find_phrase(string $lowered, string $phrase): int {
         return $m[0][1];
     }
     return -1;
+}
+
+const IRREGULAR_INFLECTIONS = [
+    'go' => ['go', 'goes', 'went', 'going'],
+    'become' => ['become', 'becomes', 'became', 'becoming'],
+    'hold' => ['hold', 'holds', 'held', 'holding'],
+];
+
+// All the inflected forms of $word a player might plausibly type
+// ("embargo" -> "embargoes"/"embargoed"/"embargoing", etc.), so a keyword
+// list built around bare infinitives still matches ordinary conjugated
+// phrasing ("China embargoes Russia") instead of silently falling through
+// to a vague wildcard just because the player used a normal tense.
+function inflections(string $word): array {
+    if (isset(IRREGULAR_INFLECTIONS[$word])) {
+        return IRREGULAR_INFLECTIONS[$word];
+    }
+    $variants = [$word, $word . 's', $word . 'es'];
+    if (str_ends_with($word, 'e')) {
+        $variants[] = $word . 'd';
+        $variants[] = mb_substr($word, 0, -1) . 'ing';
+    } else {
+        $variants[] = $word . 'ed';
+        $variants[] = $word . 'ing';
+    }
+    if (str_ends_with($word, 'y') && mb_strlen($word) > 1 && !str_contains('aeiou', mb_substr($word, -2, 1))) {
+        $variants[] = mb_substr($word, 0, -1) . 'ies';
+        $variants[] = mb_substr($word, 0, -1) . 'ied';
+    }
+    return array_unique($variants);
+}
+
+// Like find_phrase, but tolerant of the phrase's leading verb being
+// conjugated -- "embargo Russia" still recognizes "embargoes Russia" /
+// "embargoed Russia" / "embargoing Russia".
+function find_verb(string $lowered, string $phrase): int {
+    $parts = explode(' ', $phrase, 2);
+    $head = $parts[0];
+    $rest = isset($parts[1]) ? ' ' . $parts[1] : '';
+    $best = -1;
+    foreach (inflections($head) as $variant) {
+        $idx = find_phrase($lowered, $variant . $rest);
+        if ($idx !== -1 && ($best === -1 || $idx < $best)) {
+            $best = $idx;
+        }
+    }
+    return $best;
 }
 
 // Like find_phrase, but returns the earliest occurrence of $phrase that
@@ -134,14 +181,22 @@ function parse_command(array $world, string $playerId, string $text): array {
 
     $matchedType = null; $verbPos = null;
     foreach (VERB_RULES as [$orderType, $keywords]) {
+        // Take the earliest-occurring keyword in the text, not just
+        // whichever one happens to be listed first -- otherwise a later
+        // keyword can win even when an earlier one sits right next to the
+        // actual target, wrongly placing the verb after the nation
+        // mention and tripping the actor-lock guard.
+        $bestIdx = null;
         foreach ($keywords as $kw) {
-            $idx = find_phrase($lowered, $kw);
-            if ($idx !== -1) {
-                $matchedType = $orderType; $verbPos = $idx;
-                break;
+            $idx = find_verb($lowered, $kw);
+            if ($idx !== -1 && ($bestIdx === null || $idx < $bestIdx)) {
+                $bestIdx = $idx;
             }
         }
-        if ($matchedType !== null) break;
+        if ($bestIdx !== null) {
+            $matchedType = $orderType; $verbPos = $bestIdx;
+            break;
+        }
     }
 
     // Guard rail: the text's apparent subject is a nation other than the
