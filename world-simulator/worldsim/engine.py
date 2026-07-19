@@ -86,7 +86,9 @@ def run_turn(world: World, player_orders: list[Order], rng: random.Random) -> No
     """
     all_orders = list(player_orders)
     for nation in world.alive_nations():
-        if nation.is_player:
+        # Background nations are real, addressable targets but never take
+        # their own AI-chosen actions -- see Nation.is_background.
+        if nation.is_player or nation.is_background:
             continue
         all_orders.append(choose_order(world, nation.id, rng))
 
@@ -136,7 +138,7 @@ def _apply_passive_effects(world: World, rng: random.Random) -> None:
         # whose sectors are collectively above/below their baseline (40)
         # sees a small ongoing boost/drag, on top of economic_potential.
         avg_sector = sum(nation.sectors.get(s, 40.0) for s in SECTOR_TYPES) / len(SECTOR_TYPES)
-        nation.economy += (avg_sector - 40.0) * 0.03
+        nation.economy += (avg_sector - 40.0) * 0.08
 
         # Economy drifts toward this nation's long-run potential (raised
         # permanently by sustained invest_economy orders). Without this,
@@ -258,7 +260,7 @@ def _resolve_elections(world: World) -> None:
     actor-lock guarantee -- nothing here can be triggered or skipped by
     input text; it runs purely off public_opinion/stability state)."""
     for nation in world.alive_nations():
-        if nation.government_type == "authoritarian":
+        if nation.government_type == "authoritarian" or nation.is_background:
             continue  # no real elections to hold or lose
         if world.turn >= nation.election_due_turn:
             _hold_election(world, nation)
@@ -339,7 +341,12 @@ def game_status(world: World, player_id: str) -> Optional[str]:
         return "loss"
     if not player.in_power:
         return "loss"
-    alive = world.alive_nations()
-    if len(alive) == 1 and alive[0].id == player_id:
+    # Domination only requires eliminating the other nations the game
+    # actually simulates as active rivals -- background reference states
+    # (Nation.is_background) never act and were never part of "every other
+    # nation" in spirit; counting all ~190 of them here would make
+    # domination effectively unreachable.
+    alive_main = [n for n in world.alive_nations() if not n.is_background]
+    if len(alive_main) == 1 and alive_main[0].id == player_id:
         return "win"
     return None

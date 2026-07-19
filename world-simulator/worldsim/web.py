@@ -18,7 +18,7 @@ from wsgiref.simple_server import make_server
 
 from .engine import game_status, run_turn
 from .models import World
-from .orders import legal_orders
+from .orders import is_engaged, legal_orders
 from .parser import parse_command
 from .scenarios import default_world, list_nation_ids
 
@@ -78,11 +78,15 @@ def _state_payload(session: dict, status=None, ended: bool = False, advance_curs
     the first poll would have already moved the cursor past them."""
     world = session["world"]
     player_id = session["player_id"]
+    player = world.get(player_id)
     others = [
         {"id": n.id, "name": n.name, "stability": round(n.stability, 1),
          "military": round(n.military, 1), "economy": round(n.economy, 1)}
         for n in sorted(world.alive_nations(), key=lambda n: -(n.economy + n.military))
-        if n.id != player_id
+        # Background nations only show up here once actually engaged --
+        # otherwise this list would include ~190 mostly-untouched
+        # reference states every single turn.
+        if n.id != player_id and not (n.is_background and not is_engaged(player, n))
     ]
     cursor = session.get("log_cursor", 0)
     new_log = world.event_log[cursor:]

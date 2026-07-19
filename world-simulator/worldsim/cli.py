@@ -9,7 +9,7 @@ from typing import Optional
 
 from .engine import game_status, run_turn
 from .models import World
-from .orders import Order, legal_orders
+from .orders import Order, is_engaged, legal_orders
 from .parser import parse_command
 from .scenarios import default_world, list_nation_ids
 
@@ -39,6 +39,11 @@ def print_status(world: World, player_id: str) -> None:
     other_summaries = []
     for n in world.alive_nations():
         if n.id == player_id:
+            continue
+        # Background nations only show up here once actually engaged --
+        # otherwise this line would list ~190 mostly-untouched reference
+        # states every single turn.
+        if n.is_background and not is_engaged(p, n):
             continue
         other_summaries.append(f"{n.name}(stab {n.stability:.0f}/mil {n.military:.0f}/econ {n.economy:.0f})")
     print("World: " + ", ".join(other_summaries))

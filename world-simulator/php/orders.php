@@ -85,6 +85,21 @@ function is_annex_eligible(array $actor, array $target): bool {
     return $target['military'] < ANNEX_MILITARY_FLOOR || $actor['military'] > $target['military'] * ANNEX_DOMINANCE_RATIO;
 }
 
+// Whether $actor already has some real relationship with $other -- an
+// alliance, trade pact, war, embargo, or a relation score that isn't still
+// at its untouched default. Used to let a background nation surface in
+// legal_orders/the menu once the player has actually interacted with it,
+// instead of either being permanently invisible there or bloating every
+// menu with ~190 mostly irrelevant entries from turn one.
+function is_engaged(array $actor, array $other): bool {
+    $oid = $other['id'];
+    return set_has($actor['alliances'], $oid)
+        || set_has($actor['trade_pacts'], $oid)
+        || set_has($actor['at_war_with'], $oid)
+        || set_has($actor['embargoes_against'], $oid)
+        || nation_relation($actor, $oid) !== 0.0;
+}
+
 function legal_orders(array $world, string $actorId): array {
     $actor = $world['nations'][$actorId];
     $orders = [];
@@ -101,6 +116,12 @@ function legal_orders(array $world, string $actorId): array {
     }
     foreach (alive_nations($world) as $other) {
         if ($other['id'] === $actorId) continue;
+        // Background nations are real, addressable targets via free text
+        // at any time, but only clutter the AI's decision space and the
+        // player's numbered menu once genuinely engaged.
+        if (!empty($other['is_background']) && !($actor['is_player'] && is_engaged($actor, $other))) {
+            continue;
+        }
         $orders[] = make_order($actorId, 'improve_relations', $other['id']);
         if (!set_has($actor['at_war_with'], $other['id'])) {
             $mutual = min(nation_relation($actor, $other['id']), nation_relation($other, $actorId));
@@ -254,9 +275,16 @@ function resolve_invest_economy(array &$world, array $order): void {
 function resolve_invest_sector(array &$world, array $order): void {
     $actor = &$world['nations'][$order['actor_id']];
     $sector = $order['detail'];
-    $cost = min(10.0, $actor['economy'] * 0.15);
+    // Rebalance: this used to cost up to 15% of economy per turn while
+    // feeding back through a weak, heavily diluted passive drift (see
+    // apply_passive_effects' avgSector term), so several turns of sector
+    // investment visibly drained economy with no offsetting payoff. Also
+    // raise economic_potential a little, same as invest_economy does, so
+    // the passive drift-toward-potential pulls economy back up afterward.
+    $cost = min(6.0, $actor['economy'] * 0.1);
     $actor['economy'] -= $cost;
-    $actor['sectors'][$sector] = ($actor['sectors'][$sector] ?? 0.0) + $cost;
+    $actor['sectors'][$sector] = ($actor['sectors'][$sector] ?? 0.0) + $cost * 1.3;
+    $actor['economic_potential'] += $cost * 0.4;
     $commodity = SECTOR_COMMODITY[$sector] ?? null;
     if ($commodity) {
         $actor['resources'][$commodity] = ($actor['resources'][$commodity] ?? 0.0) + 5.0;

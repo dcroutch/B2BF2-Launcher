@@ -84,6 +84,18 @@ class TestGameStatus(unittest.TestCase):
                 n.alive = False
         self.assertEqual(game_status(world, "usa"), "win")
 
+    def test_win_does_not_require_eliminating_background_nations(self):
+        # Regression: background nations (Taiwan, North Korea, etc.) are
+        # part of world.nations but were never meant to count toward "the
+        # last nation standing" -- counting all ~190 of them would make
+        # domination effectively unreachable.
+        world = default_world()
+        for nid, n in world.nations.items():
+            if nid != "usa" and not n.is_background:
+                n.alive = False
+        self.assertTrue(any(n.is_background and n.alive for n in world.nations.values()))
+        self.assertEqual(game_status(world, "usa"), "win")
+
     def test_loss_when_player_ousted_from_power(self):
         world = default_world()
         world.get("usa").in_power = False

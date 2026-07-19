@@ -32,6 +32,7 @@ import re
 
 from .models import SECTOR_TYPES, World
 from .orders import Order, TARGETED_ORDERS
+from .scenarios import BACKGROUND_NATION_ALIASES
 
 
 def _find(lowered: str, phrase: str) -> int:
@@ -170,6 +171,7 @@ NATION_ALIASES = {
     "south_korea": ("south korea", "korea"),
     "saudi_arabia": ("saudi arabia", "saudis", "saudi"),
     "south_africa": ("south africa",),
+    **BACKGROUND_NATION_ALIASES,
 }
 
 

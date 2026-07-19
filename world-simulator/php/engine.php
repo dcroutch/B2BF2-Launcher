@@ -49,7 +49,9 @@ function rand_uniform(float $lo, float $hi): float {
 function run_turn(array &$world, array $playerOrders): void {
     $allOrders = $playerOrders;
     foreach (alive_nations($world) as $nation) {
-        if ($nation['is_player']) continue;
+        // Background nations are real, addressable targets but never take
+        // their own AI-chosen actions.
+        if ($nation['is_player'] || !empty($nation['is_background'])) continue;
         $allOrders[] = choose_order($world, $nation['id']);
     }
     resolve_orders($world, $allOrders);
@@ -97,7 +99,7 @@ function apply_passive_effects(array &$world): void {
         }
 
         $avgSector = array_sum(array_map(fn($s) => $nation['sectors'][$s] ?? 40.0, SECTOR_TYPES)) / count(SECTOR_TYPES);
-        $nation['economy'] += ($avgSector - 40.0) * 0.03;
+        $nation['economy'] += ($avgSector - 40.0) * 0.08;
 
         $nation['economy'] += ($nation['economic_potential'] - $nation['economy']) * 0.05;
 
@@ -192,7 +194,7 @@ function resolve_elections(array &$world): void {
     foreach (alive_nations($world) as $nationSnap) {
         $id = $nationSnap['id'];
         $nation = $world['nations'][$id];
-        if ($nation['government_type'] === 'authoritarian') continue;
+        if ($nation['government_type'] === 'authoritarian' || !empty($nation['is_background'])) continue;
         if ($world['turn'] >= $nation['election_due_turn']) {
             hold_election($world, $id);
         } elseif (
@@ -263,7 +265,11 @@ function game_status(array $world, string $playerId): ?string {
     $player = $world['nations'][$playerId];
     if (!$player['alive']) return 'loss';
     if (!$player['in_power']) return 'loss';
-    $alive = alive_nations($world);
-    if (count($alive) === 1 && $alive[0]['id'] === $playerId) return 'win';
+    // Domination only requires eliminating the other nations the game
+    // actually simulates as active rivals -- background reference states
+    // never act and were never part of "every other nation" in spirit;
+    // counting all ~190 of them would make domination unreachable.
+    $aliveMain = array_values(array_filter($world['nations'], fn($n) => $n['alive'] && empty($n['is_background'])));
+    if (count($aliveMain) === 1 && $aliveMain[0]['id'] === $playerId) return 'win';
     return null;
 }

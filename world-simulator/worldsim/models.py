@@ -75,6 +75,15 @@ class Nation:
     # illegal (a ceasefire/armistice period after sue_for_peace succeeds).
     truce_until: dict = field(default_factory=dict)
     is_player: bool = False
+    # A background nation is a real UN-member state that exists in the
+    # world as a valid, addressable target -- it can be embargoed, allied,
+    # traded with, invaded, or annexed like any other -- but it never takes
+    # its own AI-chosen actions, never holds elections, and is left out of
+    # aggregate "world reacts" bookkeeping (condemnation counts, alliance
+    # solidarity, the default legal_orders/menu enumeration, world-summary
+    # displays) unless the player has actually engaged it. It exists to be
+    # interacted with, not to be played as or to autonomously act.
+    is_background: bool = False
     alive: bool = True
     # Government/elections. "in_power" going False is a distinct end state
     # from "alive" going False: a nation can lose an election or be brought

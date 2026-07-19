@@ -131,6 +131,23 @@ def _is_annex_eligible(actor, target) -> bool:
     return target.military < ANNEX_MILITARY_FLOOR or actor.military > target.military * ANNEX_DOMINANCE_RATIO
 
 
+def is_engaged(actor, other) -> bool:
+    """Whether `actor` already has some real relationship with `other` --
+    an alliance, trade pact, war, embargo, or a relation score that isn't
+    still at its untouched default. Used to let a background nation
+    (Nation.is_background) surface in legal_orders/the menu once the
+    player has actually interacted with it, instead of either being
+    permanently invisible there or bloating every menu with ~190 mostly
+    irrelevant entries from turn one."""
+    return (
+        other.id in actor.alliances
+        or other.id in actor.trade_pacts
+        or other.id in actor.at_war_with
+        or other.id in actor.embargoes_against
+        or actor.relation(other.id) != 0.0
+    )
+
+
 def legal_orders(world: World, actor_id: str):
     """Yield every legal Order the given nation could issue this turn."""
     actor = world.get(actor_id)
@@ -144,6 +161,14 @@ def legal_orders(world: World, actor_id: str):
             yield Order(actor_id, "modify_constitution", detail=government_type)
     for other in world.alive_nations():
         if other.id == actor_id:
+            continue
+        # Background nations (Nation.is_background) are real, addressable
+        # targets via free text at any time, but only clutter the AI's
+        # decision space and the player's numbered menu once genuinely
+        # engaged -- an AI nation never initiates contact with one at all,
+        # keeping ~190 inert reference states from ever being autonomously
+        # targeted or from ballooning every menu into thousands of entries.
+        if other.is_background and not (actor.is_player and is_engaged(actor, other)):
             continue
         yield Order(actor_id, "improve_relations", other.id)
         if other.id not in actor.at_war_with:
@@ -271,9 +296,22 @@ def _resolve_invest_economy(world: World, order: Order) -> None:
 def _resolve_invest_sector(world: World, order: Order) -> None:
     actor = world.get(order.actor_id)
     sector = order.detail
-    cost = min(10.0, actor.economy * 0.15)
+    # Bug fix / rebalance: this used to cost up to 15% of economy per turn
+    # while feeding back into economy only through a weak, heavily diluted
+    # passive drift (see _apply_passive_effects' avg_sector term) -- a
+    # player who spent several turns straight investing in one sector saw
+    # their headline economy number visibly crater with no offsetting
+    # payoff for turns on end, reading as "nothing happened." Sector
+    # investment is still meant to be a slower, more structural lever than
+    # invest_economy, not a free lunch, but it should still read as an
+    # investment, not a drain: raise the nation's long-run economic
+    # ceiling a little too, same as invest_economy does, so the passive
+    # drift-toward-potential pulls economy back up over the next several
+    # turns instead of the money just vanishing.
+    cost = min(6.0, actor.economy * 0.1)
     actor.economy -= cost
-    actor.sectors[sector] = actor.sectors.get(sector, 0.0) + cost
+    actor.sectors[sector] = actor.sectors.get(sector, 0.0) + cost * 1.3
+    actor.economic_potential += cost * 0.4
     commodity = SECTOR_COMMODITY.get(sector)
     if commodity:
         actor.resources[commodity] = actor.resources.get(commodity, 0.0) + 5

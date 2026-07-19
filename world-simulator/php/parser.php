@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/orders.php';
+require_once __DIR__ . '/scenarios.php';
 
 /**
  * Deterministic free-text command parser -- no AI/LLM involved.
@@ -62,7 +63,7 @@ const NATION_ALIASES = [
     'south_korea' => ['south korea', 'korea'],
     'saudi_arabia' => ['saudi arabia', 'saudis', 'saudi'],
     'south_africa' => ['south africa'],
-];
+] + BACKGROUND_NATION_ALIASES;
 
 function find_phrase(string $lowered, string $phrase): int {
     if (preg_match('/\b' . preg_quote($phrase, '/') . '\b/u', $lowered, $m, PREG_OFFSET_CAPTURE)) {

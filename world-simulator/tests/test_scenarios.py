@@ -46,5 +46,26 @@ class TestDefaultWorld(unittest.TestCase):
         self.assertFalse(world.get("usa").is_player)
 
 
+class TestBackgroundNations(unittest.TestCase):
+    """Background nations (e.g. Taiwan, North Korea) are real, addressable
+    targets but never playable and never autonomous AI actors."""
+
+    def test_background_nations_are_not_selectable_as_player(self):
+        self.assertNotIn("taiwan", list_nation_ids())
+        with self.assertRaises(ValueError):
+            default_world(player_id="taiwan")
+
+    def test_background_nations_exist_in_the_world(self):
+        world = default_world()
+        self.assertIn("taiwan", world.nations)
+        self.assertTrue(world.get("taiwan").is_background)
+        self.assertFalse(world.get("taiwan").is_player)
+
+    def test_main_roster_nations_are_not_background(self):
+        world = default_world()
+        for nid, *_ in MAJOR_POWERS + MODERATE_POWERS:
+            self.assertFalse(world.get(nid).is_background)
+
+
 if __name__ == "__main__":
     unittest.main()

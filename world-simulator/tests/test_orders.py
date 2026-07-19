@@ -60,6 +60,40 @@ class TestLegalOrders(unittest.TestCase):
         self.assertNotIn("propose_alliance", types)
 
 
+class TestBackgroundNationLegality(unittest.TestCase):
+    """Background nations (Nation.is_background) are real order targets,
+    but must never clutter an AI nation's decision space or the player's
+    menu until the player has actually engaged them -- otherwise every
+    menu would balloon with ~190 mostly-irrelevant entries."""
+
+    def make_world_with_background(self):
+        a = Nation(id="a", name="A", is_player=True)
+        bg = Nation(id="bg", name="Background", is_background=True)
+        return World(nations={"a": a, "bg": bg})
+
+    def test_background_nation_absent_from_fresh_player_menu(self):
+        world = self.make_world_with_background()
+        targets = {o.target_id for o in legal_orders(world, "a")}
+        self.assertNotIn("bg", targets)
+
+    def test_background_nation_appears_once_player_has_engaged_it(self):
+        world = self.make_world_with_background()
+        world.get("a").embargoes_against.add("bg")
+        targets = {o.target_id for o in legal_orders(world, "a")}
+        self.assertIn("bg", targets)
+
+    def test_background_nation_never_offered_to_a_non_player_actor(self):
+        # An AI-controlled nation (is_player=False) must never see a
+        # background nation as a target, even if "engaged" by the same
+        # criteria that would surface it for the player.
+        a = Nation(id="a", name="A", is_player=False)
+        bg = Nation(id="bg", name="Background", is_background=True)
+        world = World(nations={"a": a, "bg": bg})
+        world.get("a").embargoes_against.add("bg")
+        targets = {o.target_id for o in legal_orders(world, "a")}
+        self.assertNotIn("bg", targets)
+
+
 class TestResolveOrders(unittest.TestCase):
     def test_declare_war_sets_mutual_war_state(self):
         world = make_world()
@@ -104,6 +138,18 @@ class TestResolveOrders(unittest.TestCase):
         resolve_orders(world, [Order("a", "declare_war", "b")])
         self.assertNotIn("b", world.get("a").trade_pacts)
         self.assertNotIn("a", world.get("b").trade_pacts)
+
+    def test_invest_sector_raises_economic_potential(self):
+        # Regression / rebalance: invest_sector used to cost economy every
+        # turn with only a very weak, diluted passive feedback into it,
+        # so repeated investment read as a pure drain with no visible
+        # payoff. It should also raise the nation's long-run economic
+        # ceiling (like invest_economy does) so the passive drift pulls
+        # economy back up afterward.
+        world = make_world()
+        before = world.get("a").economic_potential
+        resolve_orders(world, [Order("a", "invest_sector", detail="technology")])
+        self.assertGreater(world.get("a").economic_potential, before)
 
     def test_sue_for_peace_rejected_when_target_is_dominant(self):
         # The realistic case: the losing side (a, weak) asks the dominant

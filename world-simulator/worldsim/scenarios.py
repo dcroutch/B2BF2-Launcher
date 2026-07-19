@@ -151,6 +151,105 @@ SEED_EMBARGOES = [
 ]
 
 
+# Every other UN member state (plus Taiwan, a non-UN-member the player can
+# still meaningfully interact with), added as background nations: real,
+# addressable targets for embargo/war/alliance/trade/annexation, but never
+# playable and never autonomous AI actors -- see Nation.is_background.
+# Modest, uniform default stats (well below the major/moderate roster) since
+# these exist to be interacted with, not to be individually researched and
+# balanced the way the 28-nation core roster is.
+BACKGROUND_NATIONS = (
+    # Africa
+    ("algeria", "Algeria"), ("angola", "Angola"), ("benin", "Benin"),
+    ("botswana", "Botswana"), ("burkina_faso", "Burkina Faso"), ("burundi", "Burundi"),
+    ("cabo_verde", "Cabo Verde"), ("cameroon", "Cameroon"),
+    ("central_african_republic", "Central African Republic"), ("chad", "Chad"),
+    ("comoros", "Comoros"), ("congo_republic", "Republic of the Congo"),
+    ("congo_dr", "Democratic Republic of the Congo"), ("djibouti", "Djibouti"),
+    ("equatorial_guinea", "Equatorial Guinea"), ("eritrea", "Eritrea"),
+    ("eswatini", "Eswatini"), ("ethiopia", "Ethiopia"), ("gabon", "Gabon"),
+    ("gambia", "Gambia"), ("ghana", "Ghana"), ("guinea", "Guinea"),
+    ("guinea_bissau", "Guinea-Bissau"), ("ivory_coast", "Ivory Coast"),
+    ("kenya", "Kenya"), ("lesotho", "Lesotho"), ("liberia", "Liberia"),
+    ("libya", "Libya"), ("madagascar", "Madagascar"), ("malawi", "Malawi"),
+    ("mali", "Mali"), ("mauritania", "Mauritania"), ("mauritius", "Mauritius"),
+    ("morocco", "Morocco"), ("mozambique", "Mozambique"), ("namibia", "Namibia"),
+    ("niger", "Niger"), ("rwanda", "Rwanda"),
+    ("sao_tome_and_principe", "Sao Tome and Principe"), ("senegal", "Senegal"),
+    ("seychelles", "Seychelles"), ("sierra_leone", "Sierra Leone"),
+    ("somalia", "Somalia"), ("south_sudan", "South Sudan"), ("sudan", "Sudan"),
+    ("tanzania", "Tanzania"), ("togo", "Togo"), ("tunisia", "Tunisia"),
+    ("uganda", "Uganda"), ("zambia", "Zambia"), ("zimbabwe", "Zimbabwe"),
+    # Americas
+    ("antigua_and_barbuda", "Antigua and Barbuda"), ("bahamas", "Bahamas"),
+    ("barbados", "Barbados"), ("belize", "Belize"), ("bolivia", "Bolivia"),
+    ("chile", "Chile"), ("colombia", "Colombia"), ("costa_rica", "Costa Rica"),
+    ("cuba", "Cuba"), ("dominica", "Dominica"), ("dominican_republic", "Dominican Republic"),
+    ("ecuador", "Ecuador"), ("el_salvador", "El Salvador"), ("grenada", "Grenada"),
+    ("guatemala", "Guatemala"), ("guyana", "Guyana"), ("haiti", "Haiti"),
+    ("honduras", "Honduras"), ("jamaica", "Jamaica"), ("nicaragua", "Nicaragua"),
+    ("panama", "Panama"), ("paraguay", "Paraguay"), ("peru", "Peru"),
+    ("saint_kitts_and_nevis", "Saint Kitts and Nevis"), ("saint_lucia", "Saint Lucia"),
+    ("saint_vincent_and_the_grenadines", "Saint Vincent and the Grenadines"),
+    ("suriname", "Suriname"), ("trinidad_and_tobago", "Trinidad and Tobago"),
+    ("uruguay", "Uruguay"), ("venezuela", "Venezuela"),
+    # Asia (+ Taiwan)
+    ("afghanistan", "Afghanistan"), ("bahrain", "Bahrain"), ("bangladesh", "Bangladesh"),
+    ("bhutan", "Bhutan"), ("brunei", "Brunei"), ("cambodia", "Cambodia"),
+    ("cyprus", "Cyprus"), ("timor_leste", "Timor-Leste"), ("jordan", "Jordan"),
+    ("kazakhstan", "Kazakhstan"), ("kuwait", "Kuwait"), ("kyrgyzstan", "Kyrgyzstan"),
+    ("laos", "Laos"), ("lebanon", "Lebanon"), ("malaysia", "Malaysia"),
+    ("maldives", "Maldives"), ("mongolia", "Mongolia"), ("myanmar", "Myanmar"),
+    ("nepal", "Nepal"), ("north_korea", "North Korea"), ("oman", "Oman"),
+    ("philippines", "Philippines"), ("qatar", "Qatar"), ("singapore", "Singapore"),
+    ("sri_lanka", "Sri Lanka"), ("syria", "Syria"), ("taiwan", "Taiwan"),
+    ("tajikistan", "Tajikistan"), ("thailand", "Thailand"),
+    ("turkmenistan", "Turkmenistan"), ("uae", "United Arab Emirates"),
+    ("uzbekistan", "Uzbekistan"), ("yemen", "Yemen"),
+    # Europe
+    ("albania", "Albania"), ("andorra", "Andorra"), ("austria", "Austria"),
+    ("belarus", "Belarus"), ("belgium", "Belgium"),
+    ("bosnia_and_herzegovina", "Bosnia and Herzegovina"), ("bulgaria", "Bulgaria"),
+    ("croatia", "Croatia"), ("czech_republic", "Czech Republic"), ("denmark", "Denmark"),
+    ("estonia", "Estonia"), ("finland", "Finland"), ("greece", "Greece"),
+    ("hungary", "Hungary"), ("iceland", "Iceland"), ("ireland", "Ireland"),
+    ("latvia", "Latvia"), ("liechtenstein", "Liechtenstein"), ("lithuania", "Lithuania"),
+    ("luxembourg", "Luxembourg"), ("malta", "Malta"), ("moldova", "Moldova"),
+    ("monaco", "Monaco"), ("montenegro", "Montenegro"), ("netherlands", "Netherlands"),
+    ("north_macedonia", "North Macedonia"), ("norway", "Norway"), ("portugal", "Portugal"),
+    ("romania", "Romania"), ("san_marino", "San Marino"), ("serbia", "Serbia"),
+    ("slovakia", "Slovakia"), ("slovenia", "Slovenia"), ("sweden", "Sweden"),
+    ("switzerland", "Switzerland"),
+    # Oceania
+    ("fiji", "Fiji"), ("kiribati", "Kiribati"), ("marshall_islands", "Marshall Islands"),
+    ("micronesia", "Micronesia"), ("nauru", "Nauru"), ("new_zealand", "New Zealand"),
+    ("palau", "Palau"), ("papua_new_guinea", "Papua New Guinea"), ("samoa", "Samoa"),
+    ("solomon_islands", "Solomon Islands"), ("tonga", "Tonga"), ("tuvalu", "Tuvalu"),
+    ("vanuatu", "Vanuatu"),
+)
+
+# A handful of background nations whose real-world government is
+# unambiguously authoritarian -- worth getting right since it's visible the
+# moment a player looks one up or triggers regime-change reactions against
+# it. Everything else defaults to "democracy" as a simplification; these
+# are reference nations, not individually researched the way the core
+# roster is.
+BACKGROUND_AUTHORITARIAN = {
+    "north_korea", "belarus", "syria", "cuba", "eritrea",
+    "equatorial_guinea", "turkmenistan", "myanmar", "afghanistan",
+}
+
+BACKGROUND_NATION_ALIASES = {
+    "uae": ("uae", "united arab emirates"),
+    "north_korea": ("north korea", "dprk"),
+    "congo_dr": ("democratic republic of the congo", "dr congo", "drc"),
+    "congo_republic": ("republic of the congo", "congo-brazzaville"),
+    "ivory_coast": ("ivory coast", "cote d'ivoire", "côte d'ivoire"),
+    "timor_leste": ("timor-leste", "east timor"),
+    "czech_republic": ("czech republic", "czechia"),
+}
+
+
 def default_world(player_id: str = "usa", seed: int = 42) -> World:
     """A 28-nation multipolar world: eight major powers anchor the order,
     twenty moderate regional powers contest resources and alliances around
@@ -196,6 +295,17 @@ def default_world(player_id: str = "usa", seed: int = 42) -> World:
 
     for actor_id, target_id in SEED_EMBARGOES:
         nations[actor_id].embargoes_against.add(target_id)
+
+    for bid, bname in BACKGROUND_NATIONS:
+        nations[bid] = Nation(
+            id=bid,
+            name=bname,
+            stability=55.0,
+            military=20.0,
+            economy=30.0,
+            is_background=True,
+            government_type="authoritarian" if bid in BACKGROUND_AUTHORITARIAN else "democracy",
+        )
 
     return World(nations=nations, seed=seed)
 

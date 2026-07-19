@@ -58,9 +58,14 @@ function nation_view(array $world, string $nationId): array {
 }
 
 function state_payload(array &$world, string $playerId, ?string $status = null, bool $ended = false, bool $advanceCursor = true): array {
+    $player = $world['nations'][$playerId];
     $others = [];
     foreach (alive_nations($world) as $n) {
         if ($n['id'] === $playerId) continue;
+        // Background nations only show up here once actually engaged --
+        // otherwise this list would include ~190 mostly-untouched
+        // reference states every single turn.
+        if (!empty($n['is_background']) && !is_engaged($player, $n)) continue;
         $others[] = [
             'id' => $n['id'], 'name' => $n['name'],
             'stability' => round($n['stability'], 1),

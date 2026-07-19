@@ -54,6 +54,14 @@ function new_nation(string $id, string $name, array $overrides = []): array {
         'election_due_turn' => null,
         'in_power' => true,
         'is_player' => false,
+        // A background nation is a real UN-member state that exists in the
+        // world as a valid, addressable target -- it can be embargoed,
+        // allied, traded with, invaded, or annexed like any other -- but
+        // it never takes its own AI-chosen actions, never holds elections,
+        // and is left out of aggregate "world reacts" bookkeeping (the
+        // default legal_orders/menu enumeration, world-summary displays)
+        // unless the player has actually engaged it.
+        'is_background' => false,
         'alive' => true,
     ];
     $n = array_merge($n, $overrides);
