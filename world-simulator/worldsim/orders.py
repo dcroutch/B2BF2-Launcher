@@ -454,7 +454,17 @@ def _resolve_modify_constitution(world: World, order: Order) -> None:
         world.log(_pick_variant(COUP_MESSAGES, world.turn, actor.id).format(a=actor.name, old=old_type, new=new_type))
         condemners = 0
         for other in world.alive_nations():
-            if other.id == actor.id:
+            # Bug fix: this used to include every background nation
+            # (Nation.is_background) too -- since ~180 of the ~190
+            # background nations default to "democracy", any coup silently
+            # set a real relations.dict entry between the actor and nearly
+            # every background nation on Earth. is_engaged() (used to gate
+            # background nations out of the menu and world-summary
+            # display) treats any nonzero relation as "engaged," so this
+            # permanently and invisibly flooded the actor's own menu and
+            # world summary with ~180 background nations after a single
+            # coup -- exactly the clutter that mechanism exists to avoid.
+            if other.id == actor.id or other.is_background:
                 continue
             if other.government_type in ("democracy", "parliamentary"):
                 _shift_relations(other, actor, CONSTITUTION_COUP_RELATION_HIT)
@@ -491,6 +501,10 @@ ALLIANCE_MESSAGES = (
     "{a} and {t} sign a mutual defense pact.",
     "{a} and {t} formally align, pledging to defend one another.",
 )
+ALLIANCE_REJECTED_MESSAGES = (
+    "{t} isn't ready to formalize an alliance with {a} yet; relations aren't warm enough.",
+    "{a}'s alliance proposal to {t} goes nowhere; trust between them still runs too thin.",
+)
 BREAK_ALLIANCE_MESSAGES = (
     "{a} breaks its alliance with {t}.",
     "{a} renounces its treaty with {t}.",
@@ -500,6 +514,10 @@ TRADE_PACT_MESSAGES = (
     "{a} and {t} sign a trade pact.",
     "{a} and {t} open new trade channels.",
     "{a} and {t} strike a fresh trade agreement.",
+)
+TRADE_PACT_REJECTED_MESSAGES = (
+    "{t} declines {a}'s trade overture; relations are too strained for a deal right now.",
+    "{a}'s trade proposal to {t} falls through amid frosty relations.",
 )
 EMBARGO_MESSAGES = (
     "{a} imposes an embargo on {t}.",
@@ -524,6 +542,11 @@ PEACE_REJECTED_MESSAGES = (
 
 
 def _resolve_propose_alliance(world: World, order: Order) -> None:
+    # Bug fix: this used to produce zero log output at all when the
+    # relation threshold wasn't met -- a deliberate order the player typed
+    # (e.g. "ally with Argentina") would silently do nothing with no
+    # confirmation and no explanation, reading as the game ignoring the
+    # player.
     actor = world.get(order.actor_id)
     target = world.get(order.target_id)
     if actor.relation(target.id) >= ALLIANCE_RELATION_THRESHOLD and target.relation(actor.id) >= ALLIANCE_RELATION_THRESHOLD:
@@ -533,6 +556,8 @@ def _resolve_propose_alliance(world: World, order: Order) -> None:
         target.public_opinion += ALLIANCE_OPINION_BOOST
         world.log(_pick_variant(ALLIANCE_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
         _react_third_parties(world, actor, target, "alliance")
+    else:
+        world.log(_pick_variant(ALLIANCE_REJECTED_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
 
 
 def _resolve_break_alliance(world: World, order: Order) -> None:
@@ -546,12 +571,16 @@ def _resolve_break_alliance(world: World, order: Order) -> None:
 
 
 def _resolve_trade_pact(world: World, order: Order) -> None:
+    # Bug fix: same silent-no-op gap as propose_alliance -- see comment
+    # there.
     actor = world.get(order.actor_id)
     target = world.get(order.target_id)
     if actor.relation(target.id) >= 0 and target.relation(actor.id) >= 0:
         actor.trade_pacts.add(target.id)
         target.trade_pacts.add(actor.id)
         world.log(_pick_variant(TRADE_PACT_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
+    else:
+        world.log(_pick_variant(TRADE_PACT_REJECTED_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
 
 
 def _resolve_impose_embargo(world: World, order: Order) -> None:
@@ -659,7 +688,11 @@ def absorb_nation(world: World, conqueror, absorbed, *, peaceful: bool) -> None:
         conqueror.public_opinion += ANNEX_OPINION_HIT
         condemners = 0
         for other in world.alive_nations():
-            if other.id in (conqueror.id, absorbed.id):
+            # Bug fix: see the matching comment in _resolve_modify_constitution
+            # -- this used to include every background nation too, silently
+            # engaging the conqueror with ~180 of them on every forced
+            # annexation.
+            if other.id in (conqueror.id, absorbed.id) or other.is_background:
                 continue
             if other.government_type in ("democracy", "parliamentary"):
                 _shift_relations(other, conqueror, ANNEX_RIVAL_RELATION_HIT)

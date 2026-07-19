@@ -264,7 +264,17 @@ function absorb_nation(array &$world, string $conquerorId, string $absorbedId, b
         $conqueror['public_opinion'] += ANNEX_OPINION_HIT;
         $condemners = 0;
         foreach (alive_nations($world) as $other) {
-            if ($other['id'] === $conquerorId || $other['id'] === $absorbedId) continue;
+            // Bug fix: this used to include every background nation too --
+            // since ~180 of the ~190 background nations default to
+            // 'democracy', any forced annexation silently set a real
+            // relations entry between the conqueror and nearly every
+            // background nation on Earth. is_engaged() (used to gate
+            // background nations out of the menu and world-summary
+            // display) treats any nonzero relation as "engaged," so this
+            // permanently flooded the conqueror's own menu and world
+            // summary with ~180 background nations after a single forced
+            // annexation.
+            if ($other['id'] === $conquerorId || $other['id'] === $absorbedId || !empty($other['is_background'])) continue;
             if (in_array($other['government_type'], ELECTED_GOVERNMENT_TYPES, true)) {
                 shift_relations($world, $other['id'], $conquerorId, ANNEX_RIVAL_RELATION_HIT);
                 $condemners++;
@@ -314,6 +324,10 @@ const ALLIANCE_MESSAGES = [
     "{a} and {t} sign a mutual defense pact.",
     "{a} and {t} formally align, pledging to defend one another.",
 ];
+const ALLIANCE_REJECTED_MESSAGES = [
+    "{t} isn't ready to formalize an alliance with {a} yet; relations aren't warm enough.",
+    "{a}'s alliance proposal to {t} goes nowhere; trust between them still runs too thin.",
+];
 const BREAK_ALLIANCE_MESSAGES = [
     "{a} breaks its alliance with {t}.",
     "{a} renounces its treaty with {t}.",
@@ -323,6 +337,10 @@ const TRADE_PACT_MESSAGES = [
     "{a} and {t} sign a trade pact.",
     "{a} and {t} open new trade channels.",
     "{a} and {t} strike a fresh trade agreement.",
+];
+const TRADE_PACT_REJECTED_MESSAGES = [
+    "{t} declines {a}'s trade overture; relations are too strained for a deal right now.",
+    "{a}'s trade proposal to {t} falls through amid frosty relations.",
 ];
 const EMBARGO_MESSAGES = [
     "{a} imposes an embargo on {t}.",
@@ -455,7 +473,10 @@ function resolve_modify_constitution(array &$world, array $order): void {
         w_log($world, fill(pick_variant(COUP_MESSAGES, $world['turn'], $actor['id']), ['a' => $actor['name'], 'old' => $oldType, 'new' => $newType]));
         $condemners = 0;
         foreach (alive_nations($world) as $other) {
-            if ($other['id'] === $actor['id']) continue;
+            // Bug fix: see the matching comment in absorb_nation -- this
+            // used to include every background nation too, silently
+            // engaging the actor with ~180 of them on every coup.
+            if ($other['id'] === $actor['id'] || !empty($other['is_background'])) continue;
             if (in_array($other['government_type'], ELECTED_GOVERNMENT_TYPES, true)) {
                 shift_relations($world, $other['id'], $actor['id'], CONSTITUTION_COUP_RELATION_HIT);
                 $condemners++;
@@ -495,6 +516,8 @@ function resolve_propose_alliance(array &$world, array $order): void {
         $world['nations'][$t]['public_opinion'] += ALLIANCE_OPINION_BOOST;
         w_log($world, fill(pick_variant(ALLIANCE_MESSAGES, $world['turn'], $a, $t), ['a' => $actor['name'], 't' => $target['name']]));
         react_third_parties($world, $a, $t, 'alliance');
+    } else {
+        w_log($world, fill(pick_variant(ALLIANCE_REJECTED_MESSAGES, $world['turn'], $a, $t), ['a' => $actor['name'], 't' => $target['name']]));
     }
 }
 
@@ -515,6 +538,8 @@ function resolve_trade_pact(array &$world, array $order): void {
         set_add($world['nations'][$a]['trade_pacts'], $t);
         set_add($world['nations'][$t]['trade_pacts'], $a);
         w_log($world, fill(pick_variant(TRADE_PACT_MESSAGES, $world['turn'], $a, $t), ['a' => $actor['name'], 't' => $target['name']]));
+    } else {
+        w_log($world, fill(pick_variant(TRADE_PACT_REJECTED_MESSAGES, $world['turn'], $a, $t), ['a' => $actor['name'], 't' => $target['name']]));
     }
 }
 

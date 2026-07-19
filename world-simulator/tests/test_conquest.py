@@ -83,6 +83,22 @@ class TestAnnexation(unittest.TestCase):
         self.assertTrue(world.get("b").alive)
         self.assertIn("b", world.get("a").at_war_with)
 
+    def test_forced_annexation_does_not_engage_background_nations(self):
+        # Regression test: the "world's democracies condemn" reaction used
+        # to iterate every alive nation including background ones
+        # (Nation.is_background), silently setting a real relations entry
+        # between the conqueror and every background democracy on Earth --
+        # defeating is_engaged()'s whole purpose of keeping them out of
+        # the menu and world-summary display until actually engaged.
+        a = Nation(id="a", name="A", military=100, stability=70, government_type="authoritarian")
+        b = Nation(id="b", name="B", military=5)
+        bg = Nation(id="bg", name="Background", is_background=True)
+        world = World(nations={"a": a, "b": b, "bg": bg})
+        a.at_war_with.add("b")
+        b.at_war_with.add("a")
+        resolve_orders(world, [Order("a", "annex", "b")])
+        self.assertEqual(world.get("a").relation("bg"), 0.0)
+
 
 class TestAccession(unittest.TestCase):
     def test_accession_offered_only_at_high_mutual_relation(self):

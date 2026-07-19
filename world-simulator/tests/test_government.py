@@ -219,5 +219,26 @@ class TestSelfDirectedRegimeChangeWithPopulationFraming(unittest.TestCase):
         self.assertEqual(world.get("canada").government_type, canada_before)
 
 
+class TestCoupDoesNotEngageBackgroundNations(unittest.TestCase):
+    """Regression test: a coup's "world's democracies condemn" reaction
+    used to iterate every alive nation, including all ~190 background
+    nations (Nation.is_background), ~180 of which default to democracy.
+    That silently set a real relations entry between the actor and nearly
+    every background nation on Earth, which is_engaged() (used to gate
+    background nations out of the menu and world-summary display) treats
+    as permanent engagement -- defeating that whole mechanism the moment
+    any nation staged a coup."""
+
+    def test_background_nations_are_not_engaged_by_a_coup(self):
+        world = default_world(player_id="brazil")
+        order = Order("brazil", "modify_constitution", detail="authoritarian")
+        run_turn(world, [order], random.Random(1))
+        brazil = world.get("brazil")
+        self.assertEqual(brazil.government_type, "authoritarian")
+        for n in world.alive_nations():
+            if n.is_background:
+                self.assertEqual(brazil.relation(n.id), 0.0, f"{n.id} was unexpectedly engaged by the coup")
+
+
 if __name__ == "__main__":
     unittest.main()

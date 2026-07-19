@@ -116,7 +116,7 @@ VERB_RULES = (
     ("impose_embargo", ("embargo", "sanction", "blockade", "boycott", "surround", "encircle")),
     ("break_alliance", ("break alliance", "break our alliance", "betray", "abandon our alliance", "end alliance", "end our alliance")),
     ("propose_alliance", ("alliance", "ally with", "mutual defense", "defense pact")),
-    ("trade_pact", ("trade deal", "trade pact", "trade agreement", "free trade")),
+    ("trade_pact", ("trade deal", "trade pact", "trade agreement", "free trade", "trade with")),
     ("improve_relations", ("improve relations", "diplomacy", "reach out", "extend friendship", "make friends", "apologize")),
     ("build_military", ("build military", "build up the military", "rearm", "mobilize", "increase defense spending", "build army")),
     (

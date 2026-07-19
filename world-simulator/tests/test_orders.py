@@ -123,6 +123,20 @@ class TestEveryOrderProducesLogFeedback(unittest.TestCase):
         lines = self._resolve_and_get_new_log_lines(Order("a", "improve_relations", "b"))
         self.assertTrue(lines)
 
+    def test_rejected_alliance_proposal_produces_a_log_line(self):
+        # Same silent-no-op gap: below the relation threshold, this used
+        # to leave zero trace that anything happened.
+        lines = self._resolve_and_get_new_log_lines(Order("a", "propose_alliance", "b"))
+        self.assertTrue(lines)
+
+    def test_rejected_trade_pact_produces_a_log_line(self):
+        world = make_world()
+        world.get("a").relations["b"] = -10
+        world.get("b").relations["a"] = -10
+        before = len(world.event_log)
+        resolve_orders(world, [Order("a", "trade_pact", "b")])
+        self.assertTrue(world.event_log[before:])
+
 
 class TestResolveOrders(unittest.TestCase):
     def test_declare_war_sets_mutual_war_state(self):

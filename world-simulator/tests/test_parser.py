@@ -189,6 +189,17 @@ class TestVerbConjugation(unittest.TestCase):
         self.assertEqual(order.target_id, "russia")
 
 
+class TestTradeWithPhrasing(unittest.TestCase):
+    def test_trade_with_is_recognized_as_a_trade_pact_proposal(self):
+        # Regression: "trade with Canada" is about as natural a way as
+        # possible to propose a trade pact, but only "trade deal"/"trade
+        # pact"/"trade agreement"/"free trade" were recognized.
+        world = default_world(player_id="brazil")
+        order = parse_command(world, "brazil", "trade with canada")
+        self.assertEqual(order.type, "trade_pact")
+        self.assertEqual(order.target_id, "canada")
+
+
 class TestPassRecognizesTheLiteralWord(unittest.TestCase):
     def test_literal_pass_is_recognized(self):
         # Regression: only "do nothing"/"wait"/"hold position"/"stand
