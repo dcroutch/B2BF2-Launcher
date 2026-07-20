@@ -66,6 +66,7 @@ def _nation_view(world: World, nation_id: str) -> dict:
         "resources": {k: round(v, 1) for k, v in n.resources.items()},
         "allies": sorted(world.get(a).name for a in n.alliances if a in world.nations),
         "at_war_with": sorted(world.get(w).name for w in n.at_war_with if w in world.nations),
+        "pending_peace_offers": sorted(world.get(o).name for o in n.pending_peace_offers if o in world.nations),
     }
 
 

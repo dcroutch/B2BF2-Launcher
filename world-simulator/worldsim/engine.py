@@ -112,6 +112,16 @@ MARKET_ECONOMY_SENSITIVITY = 0.01
 # drift toward (see the resource-drift comment below).
 RESOURCE_BASELINE = 50.0
 
+# How many consecutive embargoed turns before the damage starts eating
+# into economic_potential itself, not just the day-to-day economy stat.
+SUSTAINED_EMBARGO_THRESHOLD = 10
+SUSTAINED_EMBARGO_POTENTIAL_DRAIN = 0.05
+
+# How many turns an AI-to-player peace offer stays open before it expires
+# unanswered (silence reads as implicit rejection, but doesn't force the
+# player to respond to every offer immediately).
+PEACE_OFFER_EXPIRY_TURNS = 5
+
 # Domestic fracturing: a nation governing badly enough, for long enough,
 # risks part of itself breaking away into an independent rebel faction --
 # a new, fully independent Nation the rest of the world (including the
@@ -144,6 +154,7 @@ def run_turn(world: World, player_orders: list[Order], rng: random.Random) -> No
     _resolve_elections(world, rng)
     _check_collapses(world, rng)
     react_to_declared_statuses(world, rng)
+    _expire_stale_peace_offers(world)
     world.turn += 1
 
 
@@ -168,6 +179,19 @@ def _apply_passive_effects(world: World, rng: random.Random) -> None:
         embargo_count = embargoers_by_target.get(nation.id, 0)
         nation.economy -= 1.5 * embargo_count
         nation.public_opinion -= 1.0 * embargo_count
+        # A short embargo is just a dip -- the economy drifts right back
+        # to economic_potential once it's lifted. A *sustained* one should
+        # leave lasting damage: past a threshold of consecutive embargoed
+        # turns, start eroding economic_potential itself (mirroring how
+        # invest_economy raises it), so real diplomatic/economic pressure
+        # doesn't fully wash out over a long enough game the way a purely
+        # economy-only drain does (see the drift-to-potential term below).
+        if embargo_count > 0:
+            nation.turns_embargoed += 1
+            if nation.turns_embargoed > SUSTAINED_EMBARGO_THRESHOLD:
+                nation.economic_potential -= SUSTAINED_EMBARGO_POTENTIAL_DRAIN * embargo_count
+        else:
+            nation.turns_embargoed = 0
 
         # Trade pacts give a small mutual boost.
         nation.economy += 0.5 * len(nation.trade_pacts & alive_ids)
@@ -388,6 +412,23 @@ def _check_collapses(world: World, rng: random.Random) -> None:
         nation.alive = False
         world.purge_nation_references(nation.id)
         world.log(rng.choice(COLLAPSE_MESSAGES).format(n=nation.name))
+
+
+def _expire_stale_peace_offers(world: World) -> None:
+    """A pending AI-to-player peace offer (see orders._resolve_sue_for_peace)
+    that goes unanswered for too long lapses on its own -- the war just
+    continues, same as if the player had explicitly rejected it -- rather
+    than sitting open forever."""
+    for nation in world.alive_nations():
+        if not nation.pending_peace_offers:
+            continue
+        for offerer_id, offered_turn in list(nation.pending_peace_offers.items()):
+            if world.turn - offered_turn <= PEACE_OFFER_EXPIRY_TURNS:
+                continue
+            del nation.pending_peace_offers[offerer_id]
+            offerer = world.nations.get(offerer_id)
+            if offerer is not None and offerer.alive:
+                world.log(f"{offerer.name}'s offer of peace with {nation.name} goes unanswered and expires; the war continues.")
 
 
 def game_status(world: World, player_id: str) -> Optional[str]:

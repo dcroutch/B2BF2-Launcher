@@ -93,6 +93,20 @@ class Nation:
     # pressured nation's economy on its own; it only carries a chance of a
     # one-off concession.
     access_pressure_against: set = field(default_factory=set)
+    # Consecutive turns this nation has been under at least one embargo,
+    # right now -- resets to 0 the moment no one is embargoing it. Past a
+    # threshold this starts eroding economic_potential itself (see
+    # engine.SUSTAINED_EMBARGO_*), not just the day-to-day economy stat,
+    # so a long embargo leaves lasting damage instead of fully washing out
+    # once the drift-to-potential term catches back up.
+    turns_embargoed: int = 0
+    # nation_id -> turn number an AI nation offered the player peace.
+    # Only ever populated on the player (AI-vs-AI sue_for_peace still
+    # auto-resolves immediately; see orders._resolve_sue_for_peace) --
+    # gives the player a real decision (accept_peace_offer/
+    # reject_peace_offer) instead of the outcome being an invisible,
+    # instantly-resolved coin flip.
+    pending_peace_offers: dict = field(default_factory=dict)
     is_player: bool = False
     # A background nation is a real UN-member state that exists in the
     # world as a valid, addressable target -- it can be embargoed, allied,
@@ -176,6 +190,7 @@ class World:
             other.embargoes_against.discard(nation_id)
             other.truce_until.pop(nation_id, None)
             other.access_pressure_against.discard(nation_id)
+            other.pending_peace_offers.pop(nation_id, None)
 
     def log(self, message: str) -> None:
         self.event_log.append(f"[T{self.turn}] {message}")

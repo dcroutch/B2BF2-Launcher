@@ -1,8 +1,9 @@
 import random
 import unittest
 
-from worldsim.engine import advance_turns, game_status, run_turn
-from worldsim.orders import Order
+from worldsim.engine import PEACE_OFFER_EXPIRY_TURNS, SUSTAINED_EMBARGO_THRESHOLD, advance_turns, game_status, run_turn
+from worldsim.models import Nation, World
+from worldsim.orders import Order, resolve_orders
 from worldsim.scenarios import default_world
 
 
@@ -63,7 +64,7 @@ class TestRunTurn(unittest.TestCase):
             world.get("ukraine").at_war_with.add("russia")
             run_turn(world, [Order("usa", "pass")], rng)
         russia = world.get("russia")
-        self.assertLess(russia.economy, russia.economic_potential - 10)
+        self.assertLess(russia.economy, russia.economic_potential - 2)
 
     def test_relations_heal_toward_neutral_over_time_when_at_peace(self):
         world = default_world(seed=2)
@@ -173,6 +174,66 @@ class TestAdvanceTurns(unittest.TestCase):
         # game_status was already non-None before any further turn, so the
         # loop broke immediately instead of simulating 5 more turns.
         self.assertEqual(world.turn, turn_before + 1)
+
+
+class TestSustainedEmbargo(unittest.TestCase):
+    def test_short_embargo_does_not_touch_potential(self):
+        # b is background so it never takes its own AI-chosen actions
+        # (e.g. invest_economy raising its own potential) -- isolates the
+        # embargo's effect on economic_potential from anything else.
+        world = World(nations={"a": Nation(id="a", name="A"), "b": Nation(id="b", name="B", is_background=True)})
+        world.get("a").embargoes_against.add("b")
+        before = world.get("b").economic_potential
+        rng = random.Random(1)
+        for _ in range(SUSTAINED_EMBARGO_THRESHOLD - 1):
+            run_turn(world, [], rng)
+        self.assertEqual(world.get("b").economic_potential, before)
+
+    def test_sustained_embargo_permanently_lowers_potential(self):
+        # Regression: embargoes only ever taxed the short-term economy
+        # stat, never economic_potential -- the drift-to-potential term
+        # eventually overwhelmed a fixed per-turn drain, so a sustained
+        # embargo's effect fully washed out over a long enough game.
+        # b is background so it never takes its own AI-chosen actions
+        # (e.g. invest_economy raising its own potential) -- isolates the
+        # embargo's effect on economic_potential from anything else.
+        world = World(nations={"a": Nation(id="a", name="A"), "b": Nation(id="b", name="B", is_background=True)})
+        world.get("a").embargoes_against.add("b")
+        before = world.get("b").economic_potential
+        rng = random.Random(1)
+        for _ in range(SUSTAINED_EMBARGO_THRESHOLD + 20):
+            run_turn(world, [], rng)
+        self.assertLess(world.get("b").economic_potential, before)
+
+    def test_embargo_lifting_stops_the_erosion(self):
+        # b is background so it never takes its own AI-chosen actions
+        # (e.g. invest_economy raising its own potential) -- isolates the
+        # embargo's effect on economic_potential from anything else.
+        world = World(nations={"a": Nation(id="a", name="A"), "b": Nation(id="b", name="B", is_background=True)})
+        world.get("a").embargoes_against.add("b")
+        rng = random.Random(1)
+        for _ in range(SUSTAINED_EMBARGO_THRESHOLD + 5):
+            run_turn(world, [], rng)
+        world.get("a").embargoes_against.discard("b")
+        self.assertEqual(world.get("b").turns_embargoed, SUSTAINED_EMBARGO_THRESHOLD + 5)
+        run_turn(world, [], rng)
+        self.assertEqual(world.get("b").turns_embargoed, 0)
+
+
+class TestPeaceOfferExpiry(unittest.TestCase):
+    def test_stale_offer_expires_and_war_continues(self):
+        world = default_world(player_id="usa")
+        usa = world.get("usa")
+        russia = world.get("russia")
+        usa.at_war_with.add("russia")
+        russia.at_war_with.add("usa")
+        resolve_orders(world, [Order("russia", "sue_for_peace", "usa")])
+        self.assertIn("russia", usa.pending_peace_offers)
+        rng = random.Random(1)
+        for _ in range(PEACE_OFFER_EXPIRY_TURNS + 2):
+            run_turn(world, [Order("usa", "pass")], rng)
+        self.assertEqual(usa.pending_peace_offers, {})
+        self.assertIn("russia", usa.at_war_with)
 
 
 if __name__ == "__main__":

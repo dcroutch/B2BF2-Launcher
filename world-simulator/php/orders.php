@@ -22,20 +22,23 @@ function pick_variant(array $options, ...$seedParts): string {
 const ORDER_TYPES = [
     'pass', 'build_military', 'invest_economy', 'invest_sector',
     'improve_relations', 'propose_alliance', 'break_alliance', 'trade_pact',
-    'impose_embargo', 'declare_war', 'sue_for_peace', 'annex',
+    'impose_embargo', 'declare_war', 'sue_for_peace',
+    'accept_peace_offer', 'reject_peace_offer', 'annex',
     'propose_accession', 'invite_accession', 'declare_status',
     'modify_constitution', 'wildcard',
 ];
 
 const TARGETED_ORDERS = [
     'improve_relations', 'propose_alliance', 'break_alliance', 'trade_pact',
-    'impose_embargo', 'declare_war', 'sue_for_peace', 'annex', 'propose_accession',
+    'impose_embargo', 'declare_war', 'sue_for_peace',
+    'accept_peace_offer', 'reject_peace_offer', 'annex', 'propose_accession',
     'invite_accession',
 ];
 
 const ORDER_PRIORITY = [
     'improve_relations' => 0, 'propose_alliance' => 0, 'break_alliance' => 0,
     'trade_pact' => 0, 'impose_embargo' => 0, 'sue_for_peace' => 0,
+    'accept_peace_offer' => 0, 'reject_peace_offer' => 0,
     'propose_accession' => 0, 'invite_accession' => 0, 'declare_status' => 0, 'wildcard' => 0,
     'invest_economy' => 1, 'invest_sector' => 1, 'build_military' => 1,
     'modify_constitution' => 1,
@@ -171,6 +174,12 @@ function legal_orders(array $world, string $actorId): array {
             if (is_annex_eligible($actor, $other)) {
                 $orders[] = make_order($actorId, 'annex', $other['id']);
             }
+        }
+    }
+    foreach (array_keys($actor['pending_peace_offers']) as $offererId) {
+        if (isset($world['nations'][$offererId])) {
+            $orders[] = make_order($actorId, 'accept_peace_offer', $offererId);
+            $orders[] = make_order($actorId, 'reject_peace_offer', $offererId);
         }
     }
     return $orders;
@@ -579,10 +588,35 @@ function resolve_declare_war(array &$world, array $order): void {
     react_third_parties($world, $a, $t, 'war');
 }
 
+const PEACE_OFFER_MESSAGES = [
+    "{a} offers {t} a ceasefire, awaiting a response.",
+    "{a} extends a bid for peace to {t}, awaiting a response.",
+    "{a} signals it is ready to end the war with {t}, awaiting a response.",
+];
+const PEACE_ACCEPTED_BY_PLAYER_MESSAGES = [
+    "{t} accepts {a}'s offer of peace; the war is over.",
+    "{t} agrees to {a}'s ceasefire, ending the fighting.",
+];
+const PEACE_DECLINED_BY_PLAYER_MESSAGES = [
+    "{t} rejects {a}'s offer of peace; the war continues.",
+    "{t} declines {a}'s ceasefire and presses on with the war.",
+];
+
 function resolve_sue_for_peace(array &$world, array $order): void {
     $a = $order['actor_id']; $t = $order['target_id'];
     if (!set_has($world['nations'][$a]['at_war_with'], $t)) return;
     $actor = $world['nations'][$a]; $target = $world['nations'][$t];
+    // An AI nation asking the player for peace becomes a pending offer
+    // instead of an instantly auto-resolved coin flip -- see
+    // resolve_accept_peace_offer/resolve_reject_peace_offer below.
+    // AI-vs-AI peace, and the player's own outgoing sue_for_peace, are
+    // unaffected and still resolve immediately below.
+    if (!empty($target['is_player']) && empty($actor['is_player'])) {
+        if (isset($world['nations'][$t]['pending_peace_offers'][$a])) return;
+        $world['nations'][$t]['pending_peace_offers'][$a] = $world['turn'];
+        w_log($world, fill(pick_variant(PEACE_OFFER_MESSAGES, $world['turn'], $a, $t), ['a' => $actor['name'], 't' => $target['name']]));
+        return;
+    }
     $targetDominant = $target['military'] > $actor['military'] * 1.3;
     $mutuallyExhausted = $actor['military'] < 15.0 && $target['military'] < 15.0;
     if (!$targetDominant || $mutuallyExhausted) {
@@ -597,6 +631,27 @@ function resolve_sue_for_peace(array &$world, array $order): void {
     } else {
         w_log($world, fill(pick_variant(PEACE_REJECTED_MESSAGES, $world['turn'], $a, $t), ['a' => $actor['name'], 't' => $target['name']]));
     }
+}
+
+function resolve_accept_peace_offer(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id']; // a: player responding, t: offerer
+    if (!isset($world['nations'][$a]['pending_peace_offers'][$t])) return;
+    unset($world['nations'][$a]['pending_peace_offers'][$t]);
+    if (!set_has($world['nations'][$a]['at_war_with'], $t)) return;
+    set_remove($world['nations'][$a]['at_war_with'], $t);
+    set_remove($world['nations'][$t]['at_war_with'], $a);
+    $world['nations'][$a]['truce_until'][$t] = $world['turn'] + TRUCE_DURATION;
+    $world['nations'][$t]['truce_until'][$a] = $world['turn'] + TRUCE_DURATION;
+    $world['nations'][$a]['public_opinion'] += PEACE_RELIEF_OPINION_BOOST;
+    $world['nations'][$t]['public_opinion'] += PEACE_RELIEF_OPINION_BOOST;
+    w_log($world, fill(pick_variant(PEACE_ACCEPTED_BY_PLAYER_MESSAGES, $world['turn'], $a, $t), ['a' => $world['nations'][$t]['name'], 't' => $world['nations'][$a]['name']]));
+}
+
+function resolve_reject_peace_offer(array &$world, array $order): void {
+    $a = $order['actor_id']; $t = $order['target_id']; // a: player responding, t: offerer
+    if (!isset($world['nations'][$a]['pending_peace_offers'][$t])) return;
+    unset($world['nations'][$a]['pending_peace_offers'][$t]);
+    w_log($world, fill(pick_variant(PEACE_DECLINED_BY_PLAYER_MESSAGES, $world['turn'], $a, $t), ['a' => $world['nations'][$t]['name'], 't' => $world['nations'][$a]['name']]));
 }
 
 function resolve_annex(array &$world, array $order): void {
@@ -733,6 +788,8 @@ const ORDER_RESOLVERS = [
     'impose_embargo' => 'resolve_impose_embargo',
     'declare_war' => 'resolve_declare_war',
     'sue_for_peace' => 'resolve_sue_for_peace',
+    'accept_peace_offer' => 'resolve_accept_peace_offer',
+    'reject_peace_offer' => 'resolve_reject_peace_offer',
     'annex' => 'resolve_annex',
     'propose_accession' => 'resolve_propose_accession',
     'invite_accession' => 'resolve_invite_accession',

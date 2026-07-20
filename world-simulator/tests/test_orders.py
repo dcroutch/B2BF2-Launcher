@@ -245,6 +245,73 @@ class TestResolveOrders(unittest.TestCase):
         types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
         self.assertNotIn("declare_war", types)
 
+    def test_ai_offering_peace_to_player_becomes_a_pending_offer_not_auto_resolved(self):
+        # Regression: an AI nation asking the player for peace used to be
+        # auto-resolved by the exact same instant dominance formula as any
+        # other pair, with zero player input either way. Now it creates a
+        # pending offer the player has to actually respond to.
+        world = make_world(a={"military": 10, "is_player": True}, b={"military": 90})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("b", "sue_for_peace", "a")])
+        self.assertIn("b", world.get("a").pending_peace_offers)
+        # War isn't over yet -- still awaiting the player's response.
+        self.assertIn("b", world.get("a").at_war_with)
+
+    def test_ai_vs_ai_sue_for_peace_still_auto_resolves(self):
+        # Only offers *to the player* become pending -- AI-vs-AI peace is
+        # unaffected and still resolves the same turn.
+        world = make_world(a={"military": 10}, b={"military": 90})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        self.assertEqual(world.get("a").pending_peace_offers, {})
+        self.assertIn("b", world.get("a").at_war_with)  # target b was dominant, rejected
+
+    def test_player_offering_peace_to_ai_still_auto_resolves(self):
+        # The player's own outgoing sue_for_peace is unaffected -- only
+        # incoming offers *to* the player become a pending decision.
+        world = make_world(a={"military": 90, "is_player": True}, b={"military": 10})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("a", "sue_for_peace", "b")])
+        self.assertNotIn("b", world.get("a").at_war_with)
+
+    def test_accept_peace_offer_ends_the_war(self):
+        world = make_world(a={"military": 10, "is_player": True}, b={"military": 90})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("b", "sue_for_peace", "a")])
+        resolve_orders(world, [Order("a", "accept_peace_offer", "b")])
+        self.assertNotIn("b", world.get("a").at_war_with)
+        self.assertNotIn("a", world.get("b").at_war_with)
+        self.assertEqual(world.get("a").pending_peace_offers, {})
+
+    def test_reject_peace_offer_keeps_the_war_going(self):
+        world = make_world(a={"military": 10, "is_player": True}, b={"military": 90})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("b", "sue_for_peace", "a")])
+        resolve_orders(world, [Order("a", "reject_peace_offer", "b")])
+        self.assertIn("b", world.get("a").at_war_with)
+        self.assertEqual(world.get("a").pending_peace_offers, {})
+
+    def test_responding_to_a_nonexistent_offer_is_a_no_op(self):
+        world = make_world(a={"is_player": True})
+        resolve_orders(world, [Order("a", "accept_peace_offer", "b")])
+        resolve_orders(world, [Order("a", "reject_peace_offer", "b")])
+        # No crash, no state change of consequence.
+        self.assertEqual(world.get("a").pending_peace_offers, {})
+
+    def test_pending_offer_only_offered_via_legal_orders_to_the_recipient(self):
+        world = make_world(a={"military": 10, "is_player": True}, b={"military": 90})
+        world.get("a").at_war_with.add("b")
+        world.get("b").at_war_with.add("a")
+        resolve_orders(world, [Order("b", "sue_for_peace", "a")])
+        types = [o.type for o in legal_orders(world, "a") if o.target_id == "b"]
+        self.assertIn("accept_peace_offer", types)
+        self.assertIn("reject_peace_offer", types)
+
     def test_truce_expires_after_its_duration(self):
         world = make_world(a={"military": 40}, b={"military": 40})
         world.get("a").at_war_with.add("b")

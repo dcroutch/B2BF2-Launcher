@@ -40,6 +40,12 @@ ORDER_TYPES = (
     "impose_embargo",
     "declare_war",
     "sue_for_peace",
+    # The player's response to an AI-initiated peace offer (see
+    # legal_orders and _resolve_sue_for_peace) -- only ever legal against
+    # a nation that actually has an offer pending, and only the player
+    # ever receives one (AI-vs-AI sue_for_peace still auto-resolves).
+    "accept_peace_offer",
+    "reject_peace_offer",
     # Forced conquest: only legal against a nation the actor is already at
     # war with and has crushed decisively (see legal_orders).
     "annex",
@@ -80,6 +86,8 @@ PRIORITY = {
     "trade_pact": 0,
     "impose_embargo": 0,
     "sue_for_peace": 0,
+    "accept_peace_offer": 0,
+    "reject_peace_offer": 0,
     "propose_accession": 0,
     "invite_accession": 0,
     "declare_status": 0,
@@ -125,6 +133,8 @@ TARGETED_ORDERS = {
     "impose_embargo",
     "declare_war",
     "sue_for_peace",
+    "accept_peace_offer",
+    "reject_peace_offer",
     "annex",
     "propose_accession",
     "invite_accession",
@@ -234,6 +244,10 @@ def legal_orders(world: World, actor_id: str):
             yield Order(actor_id, "sue_for_peace", other.id)
             if _is_annex_eligible(actor, other):
                 yield Order(actor_id, "annex", other.id)
+    for offerer_id in actor.pending_peace_offers:
+        if offerer_id in world.nations:
+            yield Order(actor_id, "accept_peace_offer", offerer_id)
+            yield Order(actor_id, "reject_peace_offer", offerer_id)
 
 
 ALLY_SOLIDARITY_RELATION_HIT = -20
@@ -571,6 +585,19 @@ PEACE_REJECTED_MESSAGES = (
     "{t} refuses {a}'s peace overture, sensing victory within reach.",
     "{t} presses on, spurning {a}'s bid for peace.",
 )
+PEACE_OFFER_MESSAGES = (
+    "{a} offers {t} a ceasefire, awaiting a response.",
+    "{a} extends a bid for peace to {t}, awaiting a response.",
+    "{a} signals it is ready to end the war with {t}, awaiting a response.",
+)
+PEACE_ACCEPTED_BY_PLAYER_MESSAGES = (
+    "{t} accepts {a}'s offer of peace; the war is over.",
+    "{t} agrees to {a}'s ceasefire, ending the fighting.",
+)
+PEACE_DECLINED_BY_PLAYER_MESSAGES = (
+    "{t} rejects {a}'s offer of peace; the war continues.",
+    "{t} declines {a}'s ceasefire and presses on with the war.",
+)
 
 
 def _resolve_propose_alliance(world: World, order: Order) -> None:
@@ -652,6 +679,18 @@ def _resolve_sue_for_peace(world: World, order: Order) -> None:
     target = world.get(order.target_id)  # the one who must agree to it
     if target.id not in actor.at_war_with:
         return
+    # An AI nation asking the player for peace doesn't get auto-resolved
+    # by the same dominance formula everyone else uses -- that used to
+    # mean the outcome was an instant, invisible coin flip the player had
+    # no part in (see accept_peace_offer/reject_peace_offer below for the
+    # actual response). AI-vs-AI peace, and the player's own outgoing
+    # sue_for_peace, are unaffected and still resolve immediately below.
+    if target.is_player and not actor.is_player:
+        if actor.id in target.pending_peace_offers:
+            return  # already pending -- don't re-log every retry
+        target.pending_peace_offers[actor.id] = world.turn
+        world.log(_pick_variant(PEACE_OFFER_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
+        return
     # Peace sticks if the *target* (whose consent actually matters) isn't
     # clearly dominant, or if both sides have fought each other to a
     # standstill (near-zero militaries). Bug fix: this used to check
@@ -676,6 +715,36 @@ def _resolve_sue_for_peace(world: World, order: Order) -> None:
         world.log(_pick_variant(CEASEFIRE_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
     else:
         world.log(_pick_variant(PEACE_REJECTED_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
+
+
+def _end_war_via_accepted_offer(world: World, player_nation, offerer) -> None:
+    player_nation.at_war_with.discard(offerer.id)
+    offerer.at_war_with.discard(player_nation.id)
+    player_nation.truce_until[offerer.id] = world.turn + TRUCE_DURATION
+    offerer.truce_until[player_nation.id] = world.turn + TRUCE_DURATION
+    player_nation.public_opinion += PEACE_RELIEF_OPINION_BOOST
+    offerer.public_opinion += PEACE_RELIEF_OPINION_BOOST
+
+
+def _resolve_accept_peace_offer(world: World, order: Order) -> None:
+    actor = world.get(order.actor_id)  # the player, responding
+    offerer = world.get(order.target_id)  # who made the offer
+    if offerer.id not in actor.pending_peace_offers:
+        return
+    del actor.pending_peace_offers[offerer.id]
+    if offerer.id not in actor.at_war_with:
+        return  # war already ended some other way (annexation, collapse, ...)
+    _end_war_via_accepted_offer(world, actor, offerer)
+    world.log(_pick_variant(PEACE_ACCEPTED_BY_PLAYER_MESSAGES, world.turn, actor.id, offerer.id).format(a=offerer.name, t=actor.name))
+
+
+def _resolve_reject_peace_offer(world: World, order: Order) -> None:
+    actor = world.get(order.actor_id)  # the player, responding
+    offerer = world.get(order.target_id)  # who made the offer
+    if offerer.id not in actor.pending_peace_offers:
+        return
+    del actor.pending_peace_offers[offerer.id]
+    world.log(_pick_variant(PEACE_DECLINED_BY_PLAYER_MESSAGES, world.turn, actor.id, offerer.id).format(a=offerer.name, t=actor.name))
 
 
 # Sovereignty changes: a nation ceasing to exist as an independent actor,
@@ -885,6 +954,8 @@ RESOLVERS = {
     "impose_embargo": _resolve_impose_embargo,
     "declare_war": _resolve_declare_war,
     "sue_for_peace": _resolve_sue_for_peace,
+    "accept_peace_offer": _resolve_accept_peace_offer,
+    "reject_peace_offer": _resolve_reject_peace_offer,
     "annex": _resolve_annex,
     "propose_accession": _resolve_propose_accession,
     "invite_accession": _resolve_invite_accession,

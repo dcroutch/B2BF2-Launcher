@@ -65,6 +65,16 @@ function new_nation(string $id, string $name, array $overrides = []): array {
         // unlike embargoes_against, this never drains the pressured
         // nation's economy on its own.
         'access_pressure_against' => [],
+        // Consecutive turns this nation has been under at least one
+        // embargo -- past a threshold this starts eroding
+        // economic_potential itself, not just the day-to-day economy
+        // stat (see engine.php's SUSTAINED_EMBARGO_*).
+        'turns_embargoed' => 0,
+        // nation_id => turn offered, for AI-to-player peace offers only
+        // (AI-vs-AI sue_for_peace still auto-resolves) -- gives the
+        // player a real accept/reject decision instead of an instantly
+        // auto-resolved outcome.
+        'pending_peace_offers' => [],
         'government_type' => 'democracy',
         'election_due_turn' => null,
         'in_power' => true,
@@ -145,6 +155,7 @@ function purge_nation_references(array &$world, string $nationId): void {
         unset($other['embargoes_against'][$nationId]);
         unset($other['truce_until'][$nationId]);
         unset($other['access_pressure_against'][$nationId]);
+        unset($other['pending_peace_offers'][$nationId]);
     }
     unset($other);
 }

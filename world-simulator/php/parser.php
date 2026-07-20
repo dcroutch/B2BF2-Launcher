@@ -16,6 +16,8 @@ require_once __DIR__ . '/scenarios.php';
 const VERB_RULES = [
     ['annex', ['annex', 'absorb', 'annexation']],
     ['propose_accession', ['vote to join', 'accede to', 'join the union', 'unite with', 'merge into', 'petition to join']],
+    ['accept_peace_offer', ['accept peace', 'accept the peace offer', 'accept their peace offer', 'accept the ceasefire', 'accept their ceasefire', 'agree to their peace offer', 'agree to peace']],
+    ['reject_peace_offer', ['reject peace', 'reject the peace offer', 'reject their peace offer', 'decline the peace offer', 'decline their offer of peace', 'refuse peace', 'keep fighting']],
     ['sue_for_peace', ['sue for peace', 'cease fire', 'ceasefire', 'end the war', 'make peace', 'stop the war', 'surrender', 'surrenders', 'surrendered']],
     ['declare_war', ['declare war', 'invade', 'attack', 'wage war', 'go to war', 'bomb', 'conquer']],
     ['impose_embargo', ['embargo', 'sanction', 'blockade', 'boycott', 'surround', 'encircle', 'cut ties', 'stop buying', 'stop trading', 'cut off trade']],

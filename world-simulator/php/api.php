@@ -54,6 +54,10 @@ function nation_view(array $world, string $nationId): array {
             fn($id) => $world['nations'][$id]['name'] ?? $id,
             array_filter(set_ids($n['at_war_with']), fn($id) => isset($world['nations'][$id]))
         )),
+        'pending_peace_offers' => array_values(array_map(
+            fn($id) => $world['nations'][$id]['name'] ?? $id,
+            array_filter(array_keys($n['pending_peace_offers']), fn($id) => isset($world['nations'][$id]))
+        )),
     ];
 }
 

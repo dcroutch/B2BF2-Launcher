@@ -59,6 +59,11 @@ const MARKET_ECONOMY_SENSITIVITY = 0.01;
 // regenerate up to (see apply_passive_effects).
 const RESOURCE_BASELINE = 50.0;
 
+const SUSTAINED_EMBARGO_THRESHOLD = 10;
+const SUSTAINED_EMBARGO_POTENTIAL_DRAIN = 0.05;
+
+const PEACE_OFFER_EXPIRY_TURNS = 5;
+
 const CIVIL_WAR_STABILITY_THRESHOLD = 15.0;
 const CIVIL_WAR_OPINION_THRESHOLD = 20.0;
 const CIVIL_WAR_CHANCE_PER_TURN = 0.12;
@@ -104,6 +109,7 @@ function run_turn(array &$world, array $playerOrders): void {
     resolve_elections($world);
     check_collapses($world);
     react_to_declared_statuses($world);
+    expire_stale_peace_offers($world);
     $world['turn'] += 1;
 }
 
@@ -133,6 +139,18 @@ function apply_passive_effects(array &$world): void {
         $embargoCount = $embargoersByTarget[$id] ?? 0;
         $nation['economy'] -= 1.5 * $embargoCount;
         $nation['public_opinion'] -= 1.0 * $embargoCount;
+        // A sustained embargo leaves lasting damage -- past a threshold
+        // of consecutive embargoed turns, start eroding economic_potential
+        // itself, not just the day-to-day economy stat (see the matching
+        // comment in worldsim/engine.py).
+        if ($embargoCount > 0) {
+            $nation['turns_embargoed'] += 1;
+            if ($nation['turns_embargoed'] > SUSTAINED_EMBARGO_THRESHOLD) {
+                $nation['economic_potential'] -= SUSTAINED_EMBARGO_POTENTIAL_DRAIN * $embargoCount;
+            }
+        } else {
+            $nation['turns_embargoed'] = 0;
+        }
 
         $activeTradePacts = array_intersect(set_ids($nation['trade_pacts']), $aliveIds);
         $nation['economy'] += 0.5 * count($activeTradePacts);
@@ -314,6 +332,21 @@ function check_collapses(array &$world): void {
         $world['nations'][$id]['alive'] = false;
         purge_nation_references($world, $id);
         w_log($world, fill(pick_variant(COLLAPSE_MESSAGES, $world['turn'], $id), ['n' => $nation['name']]));
+    }
+}
+
+function expire_stale_peace_offers(array &$world): void {
+    foreach (alive_nations($world) as $nationSnapshot) {
+        $id = $nationSnapshot['id'];
+        if (empty($world['nations'][$id]['pending_peace_offers'])) continue;
+        foreach ($world['nations'][$id]['pending_peace_offers'] as $offererId => $offeredTurn) {
+            if ($world['turn'] - $offeredTurn <= PEACE_OFFER_EXPIRY_TURNS) continue;
+            unset($world['nations'][$id]['pending_peace_offers'][$offererId]);
+            $offerer = $world['nations'][$offererId] ?? null;
+            if ($offerer !== null && $offerer['alive']) {
+                w_log($world, "{$offerer['name']}'s offer of peace with {$world['nations'][$id]['name']} goes unanswered and expires; the war continues.");
+            }
+        }
     }
 }
 
