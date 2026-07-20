@@ -159,6 +159,36 @@ being an independent actor:
   build up the economy, keep relations warm, and friendly rivals can be
   drawn into voluntary union instead of conquered.
 
+## Declared statuses -- player-driven narrative that the world actually reacts to
+
+`declare_status` (player-only, free-text triggered -- "Canadian scientists
+unveil matter synthesis technology") lets a nation announce a real
+achievement from a fixed catalog of ~28 statuses across five categories
+(economic, scientific, military, cultural, ideological, environmental --
+see `worldsim/statuses.py`'s `STATUS_CATALOG`). It's a real order type,
+not just flavor text: it applies a modest, one-time stat effect and is
+idempotent per nation (declaring the same status twice only pays out
+once), so it rewards flavorful play without being a repeatable exploit.
+
+The interesting part is what happens next. Every alive rival independently
+rolls, over the following turns, whether and how to react -- petition to
+join, attack for access, pressure for access (a lighter, non-punitive form
+of embargo aimed at extracting concessions rather than draining an
+economy), propose an alliance or trade pact, race to imitate it
+domestically, publicly condemn it, or simply ignore it. This stays fully
+deterministic (no AI/LLM call, same seed replays identically) the same way
+every other reaction in the game does: each rival's specific reaction is a
+weighted draw over the status's category, that rival's own
+stable-per-game diplomatic personality (`Nation.personality`, one of six
+archetypes assigned deterministically at world creation), and its current
+relation to the declaring nation, with RNG jitter on top -- so the same
+status declared in two different games, or reacted to by two different
+rivals in the same game, plausibly plays out differently. Petitioning to
+join requires the same very-high mutual-trust bar as
+`propose_accession`/`invite_accession` (relation >= 70), not just a plain
+alliance, so a single declaration can't instantly steamroll several allies
+at once.
+
 **Bug fixed as part of this**: `sue_for_peace` used to check whether the
 *asker* was dominant before accepting a ceasefire — which is backwards,
 since the losing side (the realistic asker) is essentially never dominant,

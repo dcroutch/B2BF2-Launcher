@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from .ai import choose_order
 from .models import ELECTION_TERM_LENGTH, RESOURCE_TYPES, SECTOR_TYPES, Nation, World
 from .orders import Order, absorb_nation, resolve_orders
+from .statuses import react_to_declared_statuses
 
 # Equivalent phrasings for the same kind of event, so frequent occurrences
 # (an election, a minor event, a rebel fracture) don't always read as the
@@ -138,6 +139,7 @@ def run_turn(world: World, player_orders: list[Order], rng: random.Random) -> No
     _update_market_prices(world)
     _resolve_elections(world, rng)
     _check_collapses(world, rng)
+    react_to_declared_statuses(world, rng)
     world.turn += 1
 
 

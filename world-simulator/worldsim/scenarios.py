@@ -9,6 +9,21 @@ alignment and resource base shape each region's balance of power.
 from __future__ import annotations
 
 from .models import Nation, World
+from .statuses import PERSONALITY_TYPES
+
+
+def _assign_personality(nation_id: str, seed: int) -> str:
+    """Deterministically pick a diplomatic personality (see
+    statuses.PERSONALITY_TYPES) for a nation from its id and the world
+    seed -- stable within a single game (same seed replays identically),
+    but not authored per-nation, so it scales to the full roster including
+    ~190 background nations without hand-tuning each one. Uses the same
+    stable-sum approach as orders._pick_variant rather than Python's
+    per-process-salted hash(), for the same determinism reason."""
+    total = seed
+    for ch in nation_id:
+        total = (total * 31 + ord(ch)) % 1_000_003
+    return PERSONALITY_TYPES[total % len(PERSONALITY_TYPES)]
 
 # Per-nation commodity/sector profiles for the nations most associated with a
 # given raw material or industry in the real world -- everyone else keeps
@@ -270,6 +285,7 @@ def default_world(player_id: str = "usa", seed: int = 42) -> World:
             economy=float(economy),
             is_player=(nid == player_id),
             government_type=GOVERNMENT_PROFILES.get(nid, "democracy"),
+            personality=_assign_personality(nid, seed),
         )
         for resource, value in RESOURCE_PROFILES.get(nid, {}).items():
             nation.resources[resource] = float(value)
@@ -305,6 +321,7 @@ def default_world(player_id: str = "usa", seed: int = 42) -> World:
             economy=30.0,
             is_background=True,
             government_type="authoritarian" if bid in BACKGROUND_AUTHORITARIAN else "democracy",
+            personality=_assign_personality(bid, seed),
         )
 
     return World(nations=nations, seed=seed)

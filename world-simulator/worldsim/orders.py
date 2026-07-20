@@ -55,6 +55,13 @@ ORDER_TYPES = (
     # player growing through quality of life and diplomacy rather than
     # conquest can ever pull a rival onto their own side of the map.
     "invite_accession",
+    # A player-only, free-text-triggered announcement of a national
+    # achievement (see statuses.STATUS_CATALOG). Not enumerated in
+    # legal_orders/the menu at all -- unlike every other order, this one is
+    # reachable *only* through free text, and never yielded to AI nations
+    # (see parser.py), matching the fact that it's a player-driven
+    # narrative act, not a stat-scored strategic choice.
+    "declare_status",
     # Self-only, like invest_sector: no other nation can ever be the target
     # of this order, so no input text can change *another* nation's form of
     # government -- only the actor's own.
@@ -75,6 +82,7 @@ PRIORITY = {
     "sue_for_peace": 0,
     "propose_accession": 0,
     "invite_accession": 0,
+    "declare_status": 0,
     "wildcard": 0,
     "invest_economy": 1,
     "invest_sector": 1,
@@ -752,6 +760,36 @@ def _resolve_propose_accession(world: World, order: Order) -> None:
     world.log(_pick_variant(ACCESSION_MESSAGES, world.turn, actor.id, target.id).format(a=actor.name, t=target.name))
 
 
+STATUS_ANNOUNCE_MESSAGES = (
+    "{n} announces {s} to a stunned world.",
+    "In a historic address, {n} unveils {s}.",
+    "{n} formally declares {s}, and the rest of the world takes notice.",
+)
+STATUS_REPEAT_MESSAGES = (
+    "{n} reaffirms its position in {s} -- already old news to the rest of the world.",
+)
+
+
+def _resolve_declare_status(world: World, order: Order) -> None:
+    # Local import: statuses.py imports from this module (absorb_nation,
+    # _enter_war, _shift_relations) for its own reaction logic, so importing
+    # it back at module scope here would be circular. By the time this
+    # resolver actually runs (well after both modules have finished
+    # loading), the cycle is harmless.
+    from .statuses import STATUS_CATALOG, apply_declared_status
+
+    actor = world.get(order.actor_id)
+    status_id = order.detail
+    if status_id not in STATUS_CATALOG:
+        return
+    status = STATUS_CATALOG[status_id]
+    if status_id in actor.declared_statuses:
+        world.log(_pick_variant(STATUS_REPEAT_MESSAGES, world.turn, actor.id, status_id).format(n=actor.name, s=status["name"]))
+        return
+    apply_declared_status(world, actor, status_id)
+    world.log(_pick_variant(STATUS_ANNOUNCE_MESSAGES, world.turn, actor.id, status_id).format(n=actor.name, s=status["name"]))
+
+
 def _resolve_invite_accession(world: World, order: Order) -> None:
     actor = world.get(order.actor_id)  # the stronger side, absorbs target
     target = world.get(order.target_id)  # invited to dissolve into actor
@@ -850,6 +888,7 @@ RESOLVERS = {
     "annex": _resolve_annex,
     "propose_accession": _resolve_propose_accession,
     "invite_accession": _resolve_invite_accession,
+    "declare_status": _resolve_declare_status,
     "wildcard": _resolve_wildcard,
 }
 

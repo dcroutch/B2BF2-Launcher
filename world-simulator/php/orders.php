@@ -23,7 +23,8 @@ const ORDER_TYPES = [
     'pass', 'build_military', 'invest_economy', 'invest_sector',
     'improve_relations', 'propose_alliance', 'break_alliance', 'trade_pact',
     'impose_embargo', 'declare_war', 'sue_for_peace', 'annex',
-    'propose_accession', 'invite_accession', 'modify_constitution', 'wildcard',
+    'propose_accession', 'invite_accession', 'declare_status',
+    'modify_constitution', 'wildcard',
 ];
 
 const TARGETED_ORDERS = [
@@ -35,7 +36,7 @@ const TARGETED_ORDERS = [
 const ORDER_PRIORITY = [
     'improve_relations' => 0, 'propose_alliance' => 0, 'break_alliance' => 0,
     'trade_pact' => 0, 'impose_embargo' => 0, 'sue_for_peace' => 0,
-    'propose_accession' => 0, 'invite_accession' => 0, 'wildcard' => 0,
+    'propose_accession' => 0, 'invite_accession' => 0, 'declare_status' => 0, 'wildcard' => 0,
     'invest_economy' => 1, 'invest_sector' => 1, 'build_military' => 1,
     'modify_constitution' => 1,
     'declare_war' => 2, 'annex' => 2,
@@ -623,6 +624,38 @@ function resolve_propose_accession(array &$world, array $order): void {
     w_log($world, fill(pick_variant(ACCESSION_MESSAGES, $world['turn'], $a, $t), ['a' => $aName, 't' => $tName]));
 }
 
+const STATUS_ANNOUNCE_MESSAGES = [
+    "{n} announces {s} to a stunned world.",
+    "In a historic address, {n} unveils {s}.",
+    "{n} formally declares {s}, and the rest of the world takes notice.",
+];
+const STATUS_REPEAT_MESSAGES = [
+    "{n} reaffirms its position in {s} -- already old news to the rest of the world.",
+];
+
+function resolve_declare_status(array &$world, array $order): void {
+    // Lazy require: statuses.php requires this file at its own top (for
+    // absorb_nation/shift_relations/enter_war/ACCESSION_RELATION_THRESHOLD),
+    // so requiring it back at this file's top would be circular and could
+    // run into constants not defined yet depending on which file a caller
+    // loads first. A function-local require sidesteps that entirely --
+    // by the time this actually runs, everything is loaded either way.
+    require_once __DIR__ . '/statuses.php';
+
+    $actorId = $order['actor_id'];
+    $statusId = $order['detail'];
+    if (!isset(STATUS_CATALOG[$statusId])) return;
+    $status = STATUS_CATALOG[$statusId];
+    $actor = $world['nations'][$actorId];
+    if (set_has($actor['declared_statuses'], $statusId)) {
+        w_log($world, fill(pick_variant(STATUS_REPEAT_MESSAGES, $world['turn'], $actorId, $statusId), ['n' => $actor['name'], 's' => $status['name']]));
+        return;
+    }
+    apply_declared_status($world, $actorId, $statusId);
+    $actor = $world['nations'][$actorId];
+    w_log($world, fill(pick_variant(STATUS_ANNOUNCE_MESSAGES, $world['turn'], $actorId, $statusId), ['n' => $actor['name'], 's' => $status['name']]));
+}
+
 function resolve_invite_accession(array &$world, array $order): void {
     $a = $order['actor_id']; $t = $order['target_id'];
     $actor = $world['nations'][$a]; $target = $world['nations'][$t];
@@ -703,6 +736,7 @@ const ORDER_RESOLVERS = [
     'annex' => 'resolve_annex',
     'propose_accession' => 'resolve_propose_accession',
     'invite_accession' => 'resolve_invite_accession',
+    'declare_status' => 'resolve_declare_status',
     'wildcard' => 'resolve_wildcard',
 ];
 

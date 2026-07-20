@@ -74,6 +74,25 @@ class Nation:
     # nation_id -> turn number until which declaring war on that nation is
     # illegal (a ceasefire/armistice period after sue_for_peace succeeds).
     truce_until: dict = field(default_factory=dict)
+    # A stable-per-game diplomatic temperament (see statuses.PERSONALITY_TYPES),
+    # assigned once at world creation. Colors how this nation tends to react
+    # to other nations' declared statuses -- not a player-visible stat, and
+    # never the sole factor in any single reaction (see statuses.py).
+    personality: str = ""
+    # Status ids this nation has successfully declared (see
+    # orders._resolve_declare_status / statuses.STATUS_CATALOG). Idempotent:
+    # declaring the same status twice only pays out once.
+    declared_statuses: set = field(default_factory=set)
+    # "{status_id}:{reactor_id}" pairs already resolved, so each rival's
+    # reaction to a given declared status is decided once, not re-rolled
+    # every turn forever.
+    status_reactions_done: set = field(default_factory=set)
+    # Nation ids this nation is currently pressuring for access to one of
+    # their declared statuses (see statuses.py's "pressure_for_access"
+    # reaction) -- unlike embargoes_against, this never drains the
+    # pressured nation's economy on its own; it only carries a chance of a
+    # one-off concession.
+    access_pressure_against: set = field(default_factory=set)
     is_player: bool = False
     # A background nation is a real UN-member state that exists in the
     # world as a valid, addressable target -- it can be embargoed, allied,
@@ -156,6 +175,7 @@ class World:
             other.at_war_with.discard(nation_id)
             other.embargoes_against.discard(nation_id)
             other.truce_until.pop(nation_id, None)
+            other.access_pressure_against.discard(nation_id)
 
     def log(self, message: str) -> None:
         self.event_log.append(f"[T{self.turn}] {message}")

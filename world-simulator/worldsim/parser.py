@@ -201,6 +201,23 @@ def _find_government(lowered: str) -> str:
     return None
 
 
+def _find_declared_status(lowered: str):
+    """Scan for any status announcement phrase (see
+    statuses.STATUS_CATALOG) and return (status_id, position) for the
+    earliest match, or (None, None). declare_status is entirely free-text
+    triggered -- unlike every other order type it has no menu/legal_orders
+    entry at all -- so this is the only path that can ever produce it."""
+    from .statuses import STATUS_CATALOG
+
+    best_id, best_idx = None, None
+    for status_id, status in STATUS_CATALOG.items():
+        for phrase in status["keywords"]:
+            idx = _find_verb(lowered, phrase)
+            if idx != -1 and (best_idx is None or idx < best_idx):
+                best_id, best_idx = status_id, idx
+    return best_id, best_idx
+
+
 def parse_command(world: World, player_id: str, text: str) -> Order:
     """Turn free-text player input into a resolvable Order for player_id.
 
@@ -247,6 +264,18 @@ def parse_command(world: World, player_id: str, text: str) -> Order:
             matched_type, verb_pos = order_type, best_idx
             break
 
+    # declare_status is checked separately from VERB_RULES (its phrases
+    # come from statuses.STATUS_CATALOG, keyed by status id rather than a
+    # fixed order type) and only wins if it occurs at least as early in
+    # the text as whatever VERB_RULES matched -- so "let's embargo Russia,
+    # our post-scarcity economy can handle it" still resolves as the
+    # embargo it leads with, not the aside about the economy.
+    status_id, status_pos = _find_declared_status(lowered)
+    status_detail = None
+    if status_id is not None and (verb_pos is None or status_pos <= verb_pos):
+        matched_type, verb_pos = "declare_status", status_pos
+        status_detail = status_id
+
     # Guard rail: the text's apparent subject is a nation other than the
     # player, mentioned before any recognized verb (e.g. "China declares
     # war on Russia", "Have Germany invade Poland"). The player cannot
@@ -282,6 +311,9 @@ def parse_command(world: World, player_id: str, text: str) -> Order:
 
     if matched_type == "invest_sector":
         return Order(player_id, "invest_sector", detail=_find_sector(lowered))
+
+    if matched_type == "declare_status":
+        return Order(player_id, "declare_status", detail=status_detail)
 
     if matched_type in TARGETED_ORDERS:
         if target_id is None:

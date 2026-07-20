@@ -50,6 +50,21 @@ function new_nation(string $id, string $name, array $overrides = []): array {
         'embargoes_against' => [],
         'at_war_with' => [],
         'truce_until' => [],
+        // Stable-per-game diplomatic temperament (see statuses.php's
+        // PERSONALITY_TYPES), assigned once at world creation.
+        'personality' => '',
+        // Status ids this nation has successfully declared (see
+        // resolve_declare_status / statuses.php's STATUS_CATALOG).
+        // Idempotent: declaring the same status twice only pays out once.
+        'declared_statuses' => [],
+        // "{status_id}:{reactor_id}" keys already resolved, so each
+        // rival's reaction to a given declared status is decided once.
+        'status_reactions_done' => [],
+        // Nation ids this nation is pressuring for access to one of their
+        // declared statuses (see statuses.php's pressure_for_access) --
+        // unlike embargoes_against, this never drains the pressured
+        // nation's economy on its own.
+        'access_pressure_against' => [],
         'government_type' => 'democracy',
         'election_due_turn' => null,
         'in_power' => true,
@@ -129,6 +144,7 @@ function purge_nation_references(array &$world, string $nationId): void {
         unset($other['at_war_with'][$nationId]);
         unset($other['embargoes_against'][$nationId]);
         unset($other['truce_until'][$nationId]);
+        unset($other['access_pressure_against'][$nationId]);
     }
     unset($other);
 }

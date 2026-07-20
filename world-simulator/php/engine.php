@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/ai.php';
+require_once __DIR__ . '/statuses.php';
 
 const WAR_STABILITY_DRAIN = 2.0;
 const WAR_MILITARY_DRAIN = 1.5;
@@ -98,6 +99,7 @@ function run_turn(array &$world, array $playerOrders): void {
     update_market_prices($world);
     resolve_elections($world);
     check_collapses($world);
+    react_to_declared_statuses($world);
     $world['turn'] += 1;
 }
 

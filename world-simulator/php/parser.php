@@ -163,6 +163,25 @@ function find_government(string $lowered): ?string {
     return null;
 }
 
+// Scan for any status announcement phrase (see statuses.php's
+// STATUS_CATALOG) and return [status_id, position] for the earliest
+// match, or [null, null]. declare_status is entirely free-text triggered
+// -- it has no menu/legal_orders entry at all -- so this is the only path
+// that can ever produce it.
+function find_declared_status(string $lowered): array {
+    require_once __DIR__ . '/statuses.php';
+    $bestId = null; $bestIdx = null;
+    foreach (STATUS_CATALOG as $statusId => $status) {
+        foreach ($status['keywords'] as $phrase) {
+            $idx = find_verb($lowered, $phrase);
+            if ($idx !== -1 && ($bestIdx === null || $idx < $bestIdx)) {
+                $bestId = $statusId; $bestIdx = $idx;
+            }
+        }
+    }
+    return [$bestId, $bestIdx];
+}
+
 function parse_command(array $world, string $playerId, string $text): array {
     $lowered = mb_strtolower($text);
     $lookup = nation_lookup($world);
@@ -201,6 +220,17 @@ function parse_command(array $world, string $playerId, string $text): array {
         }
     }
 
+    // declare_status is checked separately from VERB_RULES (its phrases
+    // come from statuses.php's STATUS_CATALOG, keyed by status id rather
+    // than a fixed order type) and only wins if it occurs at least as
+    // early in the text as whatever VERB_RULES matched.
+    [$statusId, $statusPos] = find_declared_status($lowered);
+    $statusDetail = null;
+    if ($statusId !== null && ($verbPos === null || $statusPos <= $verbPos)) {
+        $matchedType = 'declare_status'; $verbPos = $statusPos;
+        $statusDetail = $statusId;
+    }
+
     // Guard rail: the text's apparent subject is a nation other than the
     // player, mentioned before any recognized verb -- can never become a
     // real order for that nation; downgrade to a wildcard about it.
@@ -232,6 +262,10 @@ function parse_command(array $world, string $playerId, string $text): array {
 
     if ($matchedType === 'invest_sector') {
         return make_order($playerId, 'invest_sector', null, find_sector($lowered));
+    }
+
+    if ($matchedType === 'declare_status') {
+        return make_order($playerId, 'declare_status', null, $statusDetail);
     }
 
     if (in_array($matchedType, TARGETED_ORDERS, true)) {

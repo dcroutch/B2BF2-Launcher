@@ -1,5 +1,18 @@
 <?php
 require_once __DIR__ . '/models.php';
+require_once __DIR__ . '/statuses.php';
+
+// Deterministically pick a diplomatic personality (see statuses.php's
+// PERSONALITY_TYPES) for a nation from its id and the world seed -- see
+// worldsim/scenarios.py's _assign_personality for the full rationale.
+// Same stable-sum approach as pick_variant(), not a PHP hash function.
+function assign_personality(string $nationId, int $seed): string {
+    $total = $seed;
+    foreach (str_split($nationId) as $ch) {
+        $total = ($total * 31 + ord($ch)) % 1000003;
+    }
+    return PERSONALITY_TYPES[$total % count(PERSONALITY_TYPES)];
+}
 
 // id => [name, stability, military, economy]
 const MAJOR_POWERS = [
@@ -307,6 +320,7 @@ function default_world(string $playerId = 'usa'): array {
         throw new InvalidArgumentException("Unknown player_id: $playerId");
     }
 
+    $seed = random_int(1, 1000000);
     $nations = [];
     foreach (default_nations_list() as [$id, $name, $stability, $military, $economy]) {
         $n = new_nation($id, $name, [
@@ -315,6 +329,7 @@ function default_world(string $playerId = 'usa'): array {
             'economy' => (float)$economy,
             'is_player' => $id === $playerId,
             'government_type' => GOVERNMENT_PROFILES[$id] ?? 'democracy',
+            'personality' => assign_personality($id, $seed),
         ]);
         foreach (RESOURCE_PROFILES[$id] ?? [] as $r => $v) {
             $n['resources'][$r] = (float)$v;
@@ -359,8 +374,9 @@ function default_world(string $playerId = 'usa'): array {
             'economy' => 30.0,
             'is_background' => true,
             'government_type' => isset(BACKGROUND_AUTHORITARIAN[$bid]) ? 'authoritarian' : 'democracy',
+            'personality' => assign_personality($bid, $seed),
         ]);
     }
 
-    return new_world($nations, random_int(1, 1000000));
+    return new_world($nations, $seed);
 }
