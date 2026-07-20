@@ -75,7 +75,25 @@ def score_order(world: World, order: Order) -> float:
         power_edge = actor.military - target.military
         stability_ok = actor.stability > 40
         score = power_edge * 0.1 + (-rel) * 0.05
-        return score if stability_ok else score - 15
+        if not stability_ok:
+            score -= 15
+        # A nation already fighting doesn't just as happily open a second
+        # front -- real militaries are stretched by an ongoing war, and a
+        # war that isn't yet decisively won ties down forces that would
+        # otherwise back a new invasion. Without this, a nation that starts
+        # hostile to two neighbors at once (e.g. Russia to both Ukraine and
+        # Poland) reliably invades both within the first few turns of every
+        # game regardless of how the first war is actually going -- not a
+        # deliberate design choice, just a blind spot in this scoring.
+        if actor.at_war_with:
+            score -= 10.0 * len(actor.at_war_with)
+            worst_edge = min(
+                (actor.military - world.get(eid).military for eid in actor.at_war_with if eid in world.nations),
+                default=0.0,
+            )
+            if worst_edge < 20.0:
+                score -= 20.0
+        return score
 
     if order.type == "sue_for_peace":
         # Want peace when losing (weaker military), stability is low, or

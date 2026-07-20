@@ -28,6 +28,48 @@ class TestScoreOrder(unittest.TestCase):
         score = score_order(world, Order("a", "declare_war", "b"))
         self.assertGreater(score, 0)
 
+    def test_declare_war_is_discouraged_by_an_existing_war(self):
+        # Regression: a nation hostile to two neighbors at once (the
+        # Russia/Ukraine/Poland shape) used to score a second war exactly
+        # as favorably as the first, regardless of how the first war was
+        # going -- reliably invading both within the first few turns of
+        # every game. Same matchup, only difference is whether the actor
+        # is already fighting a third nation it isn't yet beating.
+        a = Nation(id="a", name="A", military=80, stability=80)
+        b = Nation(id="b", name="B", military=40)
+        c = Nation(id="c", name="C", military=75)  # a isn't winning decisively
+        a.relations["b"] = -50
+        a.relations["c"] = -70
+        b.relations["a"] = -50
+        c.relations["a"] = -70
+        world = World(nations={"a": a, "b": b, "c": c})
+
+        score_not_at_war = score_order(world, Order("a", "declare_war", "b"))
+
+        a.at_war_with.add("c")
+        c.at_war_with.add("a")
+        score_already_at_war = score_order(world, Order("a", "declare_war", "b"))
+
+        self.assertLess(score_already_at_war, score_not_at_war)
+        self.assertLess(score_already_at_war, 0)
+
+    def test_declare_war_still_possible_when_already_winning_decisively(self):
+        # The penalty shouldn't make a second war categorically impossible
+        # -- a nation that's already crushing its first opponent can still
+        # rationally open a second front against a much weaker target.
+        a = Nation(id="a", name="A", military=95, stability=80)
+        b = Nation(id="b", name="B", military=10)
+        c = Nation(id="c", name="C", military=5)  # a is dominating this war
+        a.relations["b"] = -90
+        a.relations["c"] = -90
+        b.relations["a"] = -90
+        c.relations["a"] = -90
+        a.at_war_with.add("c")
+        c.at_war_with.add("a")
+        world = World(nations={"a": a, "b": b, "c": c})
+        score = score_order(world, Order("a", "declare_war", "b"))
+        self.assertGreater(score, 0)
+
     def test_invest_economy_more_attractive_when_poor(self):
         rich = make_world(a={"economy": 90})
         poor = make_world(a={"economy": 10})

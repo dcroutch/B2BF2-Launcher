@@ -59,7 +59,24 @@ function score_order(array $world, array $order): float {
         $powerEdge = $actor['military'] - $target['military'];
         $stabilityOk = $actor['stability'] > 40;
         $score = $powerEdge * 0.1 + (-$rel) * 0.05;
-        return $stabilityOk ? $score : $score - 15.0;
+        if (!$stabilityOk) $score -= 15.0;
+        // A nation already fighting doesn't just as happily open a second
+        // front -- see worldsim/ai.py's matching comment for the full
+        // rationale (Russia reliably invading both Ukraine and Poland
+        // within the first few turns regardless of how the Ukraine war
+        // was actually going).
+        if (!empty($actor['at_war_with'])) {
+            $score -= 10.0 * count($actor['at_war_with']);
+            $worstEdge = null;
+            foreach (array_keys($actor['at_war_with']) as $eid) {
+                if (!isset($world['nations'][$eid])) continue;
+                $edge = $actor['military'] - $world['nations'][$eid]['military'];
+                if ($worstEdge === null || $edge < $worstEdge) $worstEdge = $edge;
+            }
+            if ($worstEdge === null) $worstEdge = 0.0;
+            if ($worstEdge < 20.0) $score -= 20.0;
+        }
+        return $score;
     }
 
     if ($type === 'sue_for_peace') {

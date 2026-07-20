@@ -107,6 +107,10 @@ UNREST_OPINION_THRESHOLD = 40.0
 MARKET_PRICE_ADJUST_RATE = 0.1
 MARKET_PRICE_MIN, MARKET_PRICE_MAX = 0.5, 2.0
 MARKET_ECONOMY_SENSITIVITY = 0.01
+# The "neutral" resource level the market-surplus formula treats as
+# neither a windfall nor a squeeze -- also the level resources passively
+# drift toward (see the resource-drift comment below).
+RESOURCE_BASELINE = 50.0
 
 # Domestic fracturing: a nation governing badly enough, for long enough,
 # risks part of itself breaking away into an independent rebel faction --
@@ -173,7 +177,7 @@ def _apply_passive_effects(world: World, rng: random.Random) -> None:
         # commodity is a squeeze (net importer) -- ties each nation's
         # economy to the same shared markets everyone else trades in.
         for r in RESOURCE_TYPES:
-            surplus = nation.resources.get(r, 0.0) - 50.0
+            surplus = nation.resources.get(r, 0.0) - RESOURCE_BASELINE
             price_pressure = world.market_prices.get(r, 1.0) - 1.0
             nation.economy += surplus * price_pressure * MARKET_ECONOMY_SENSITIVITY
 
@@ -209,9 +213,24 @@ def _apply_passive_effects(world: World, rng: random.Random) -> None:
                 continue
             nation.relations[other_id] += (0 - nation.relations[other_id]) * 0.02
 
-        # Resources regenerate slowly if not embargoed.
-        for r in nation.resources:
-            nation.resources[r] += 1.0
+        # Resources regenerate slowly if depleted (e.g. by a drought event
+        # or sustained trade), only up to the neutral baseline (see
+        # RESOURCE_BASELINE) and only while not embargoed -- matching what
+        # this comment always said but the code never actually did.
+        # Previously this was a flat +1.0/turn forever with no ceiling and
+        # no embargo check: every nation's resources climbed toward the
+        # 200 cap over a long game regardless of activity, flooding the
+        # global market with "surplus" that permanently craters every idle
+        # (especially background) nation's economy through the
+        # price-pressure formula above -- a systemic bug, not intended
+        # balance. A nation with a genuinely elevated resource profile
+        # (see scenarios.RESOURCE_PROFILES, e.g. Saudi Arabia's oil) is
+        # never regenerated back down -- this only ever recovers a deficit,
+        # never erodes a windfall.
+        if embargoers_by_target.get(nation.id, 0) == 0:
+            for r in nation.resources:
+                if nation.resources[r] < RESOURCE_BASELINE:
+                    nation.resources[r] = min(RESOURCE_BASELINE, nation.resources[r] + 1.0)
 
         _maybe_trigger_minor_event(world, nation, rng)
 

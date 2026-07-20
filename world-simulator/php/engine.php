@@ -54,6 +54,10 @@ const MARKET_PRICE_ADJUST_RATE = 0.1;
 const MARKET_PRICE_MIN = 0.5;
 const MARKET_PRICE_MAX = 2.0;
 const MARKET_ECONOMY_SENSITIVITY = 0.01;
+// The "neutral" resource level the market-surplus formula treats as
+// neither a windfall nor a squeeze -- also the ceiling resources passively
+// regenerate up to (see apply_passive_effects).
+const RESOURCE_BASELINE = 50.0;
 
 const CIVIL_WAR_STABILITY_THRESHOLD = 15.0;
 const CIVIL_WAR_OPINION_THRESHOLD = 20.0;
@@ -134,7 +138,7 @@ function apply_passive_effects(array &$world): void {
         $nation['economy'] += 0.5 * count($activeTradePacts);
 
         foreach (RESOURCE_TYPES as $r) {
-            $surplus = ($nation['resources'][$r] ?? 0.0) - 50.0;
+            $surplus = ($nation['resources'][$r] ?? 0.0) - RESOURCE_BASELINE;
             $pricePressure = ($world['market_prices'][$r] ?? 1.0) - 1.0;
             $nation['economy'] += $surplus * $pricePressure * MARKET_ECONOMY_SENSITIVITY;
         }
@@ -155,8 +159,18 @@ function apply_passive_effects(array &$world): void {
             $nation['relations'][$otherId] += (0 - $nation['relations'][$otherId]) * 0.02;
         }
 
-        foreach (RESOURCE_TYPES as $r) {
-            $nation['resources'][$r] = ($nation['resources'][$r] ?? 0.0) + 1.0;
+        // Resources regenerate slowly if depleted, only up to the neutral
+        // baseline, and only while not embargoed -- see the matching
+        // comment in worldsim/engine.py for the runaway-collapse bug this
+        // fixes (previously a flat +1.0/turn forever with no ceiling and
+        // no embargo check).
+        if (($embargoersByTarget[$id] ?? 0) === 0) {
+            foreach (RESOURCE_TYPES as $r) {
+                $current = $nation['resources'][$r] ?? 0.0;
+                if ($current < RESOURCE_BASELINE) {
+                    $nation['resources'][$r] = min(RESOURCE_BASELINE, $current + 1.0);
+                }
+            }
         }
 
         maybe_trigger_minor_event($world, $id);
